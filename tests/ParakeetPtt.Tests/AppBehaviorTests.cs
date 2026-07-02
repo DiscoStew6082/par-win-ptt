@@ -34,6 +34,7 @@ public sealed class AppBehaviorTests
             Assert.AreEqual("Transcript pasted into the active app.", overlay.MessageTextForTest);
             Assert.IsTrue(overlay.AutoHideTimerEnabledForTest);
             Assert.IsFalse(overlay.Visible);
+            Assert.AreEqual(StatusOverlayForm.DefaultSizeForTest, overlay.Size);
         });
     }
 
@@ -51,6 +52,37 @@ public sealed class AppBehaviorTests
             Assert.AreEqual("Recording 00:00" + Environment.NewLine + "Release to transcribe", overlay.MessageTextForTest);
             Assert.IsTrue(overlay.TitleHeightForTest >= overlay.TitlePreferredHeightForTest + 10);
             Assert.IsTrue(overlay.MessageHeightForTest >= overlay.MessagePreferredHeightForTest + 10);
+        });
+    }
+
+    [TestMethod]
+    public void StatusOverlayReservesListeningTextAboveLargeActivityMeter()
+    {
+        RunOnStaThread(() =>
+        {
+            using var overlay = new StatusOverlayForm();
+
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Listening);
+
+            Assert.AreEqual(560, StatusOverlayForm.ListeningSizeForTest.Width);
+            Assert.AreEqual(StatusOverlayForm.ListeningSizeForTest, overlay.Size);
+            Assert.AreEqual(288, overlay.ActivityMeterHeightForTest);
+            Assert.IsTrue(overlay.TextPanelHeightForTest >= overlay.TitlePreferredHeightForTest + overlay.MessagePreferredHeightForTest + 20);
+            Assert.IsTrue(overlay.ActivityMeterTopForTest >= overlay.TextPanelBottomForTest);
+        });
+    }
+
+    [TestMethod]
+    public void StatusOverlayReturnsToCompactSizeAfterListening()
+    {
+        RunOnStaThread(() =>
+        {
+            using var overlay = new StatusOverlayForm();
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Listening);
+
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Transcribing);
+
+            Assert.AreEqual(StatusOverlayForm.DefaultSizeForTest, overlay.Size);
         });
     }
 
@@ -193,6 +225,16 @@ public sealed class AppBehaviorTests
             StatusOverlayForm.DefaultSizeForTest);
 
         Assert.AreEqual(new Point(420, 670), location);
+    }
+
+    [TestMethod]
+    public void StatusOverlayListeningPositionAccountsForTallActivityMeter()
+    {
+        var location = StatusOverlayForm.CalculateBottomCenterLocationForTest(
+            new Rectangle(100, 50, 1200, 800),
+            StatusOverlayForm.ListeningSizeForTest);
+
+        Assert.AreEqual(new Point(420, 410), location);
     }
 
     [TestMethod]

@@ -7,9 +7,11 @@ internal sealed class StatusOverlayForm : Form
 {
     private const int WsExNoActivate = 0x08000000;
     private const int WsExToolWindow = 0x00000080;
-    private static readonly Size DefaultOverlaySize = new(560, 160);
+    private static readonly Size CompactOverlaySize = new(560, 160);
+    private static readonly Size ListeningOverlaySize = new(560, 420);
 
     private readonly Panel _accent = new();
+    private readonly Panel _textPanel = new();
     private readonly Label _title = new();
     private readonly Label _message = new();
     private readonly ActivityMeterControl _activityMeter = new();
@@ -24,7 +26,7 @@ internal sealed class StatusOverlayForm : Form
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
-        Size = DefaultOverlaySize;
+        Size = CompactOverlaySize;
         MinimumSize = Size;
         MaximumSize = Size;
         Padding = new Padding(1);
@@ -52,8 +54,14 @@ internal sealed class StatusOverlayForm : Form
         _message.TextAlign = ContentAlignment.MiddleLeft;
         _message.AutoEllipsis = true;
 
+        _textPanel.Dock = DockStyle.Top;
+        _textPanel.Height = 104;
+        _textPanel.BackColor = Color.Transparent;
+        _textPanel.Controls.Add(_message);
+        _textPanel.Controls.Add(_title);
+
         _activityMeter.Dock = DockStyle.Bottom;
-        _activityMeter.Height = 36;
+        _activityMeter.Height = 288;
         _activityMeter.Visible = false;
 
         var content = new Panel
@@ -63,8 +71,7 @@ internal sealed class StatusOverlayForm : Form
             BackColor = DarkTheme.Surface
         };
         content.Controls.Add(_activityMeter);
-        content.Controls.Add(_message);
-        content.Controls.Add(_title);
+        content.Controls.Add(_textPanel);
 
         Controls.Add(content);
         Controls.Add(_accent);
@@ -83,7 +90,9 @@ internal sealed class StatusOverlayForm : Form
 
     internal static int NoActivateExtendedStyleForTest => WsExNoActivate;
 
-    internal static Size DefaultSizeForTest => DefaultOverlaySize;
+    internal static Size DefaultSizeForTest => CompactOverlaySize;
+
+    internal static Size ListeningSizeForTest => ListeningOverlaySize;
 
     internal bool ShowWithoutActivationForTest => ShowWithoutActivation;
 
@@ -116,6 +125,14 @@ internal sealed class StatusOverlayForm : Form
     internal int TitlePreferredHeightForTest => _title.GetPreferredSize(new Size(_title.Width, 0)).Height;
 
     internal int MessagePreferredHeightForTest => _message.GetPreferredSize(new Size(_message.Width, 0)).Height;
+
+    internal int TextPanelHeightForTest => _textPanel.Height;
+
+    internal int TextPanelBottomForTest => _textPanel.Bottom;
+
+    internal int ActivityMeterHeightForTest => _activityMeter.Height;
+
+    internal int ActivityMeterTopForTest => _activityMeter.Top;
 
     protected override CreateParams CreateParams
     {
@@ -174,6 +191,7 @@ internal sealed class StatusOverlayForm : Form
         {
             _hideTimer.Dispose();
             _liveActivityTimer.Dispose();
+            _textPanel.Dispose();
             _title.Dispose();
             _message.Dispose();
             _accent.Dispose();
@@ -223,6 +241,7 @@ internal sealed class StatusOverlayForm : Form
 
     private void StartLiveActivity(DictationStatus status)
     {
+        UseOverlaySize(ListeningOverlaySize);
         _accent.BackColor = AccentFor(status.Kind);
         _title.Text = status.Title;
         _listeningStartedAt = DateTimeOffset.UtcNow;
@@ -238,6 +257,7 @@ internal sealed class StatusOverlayForm : Form
         _liveActivityTimer.Stop();
         _activityMeterRequestedVisible = false;
         _activityMeter.Visible = false;
+        UseOverlaySize(CompactOverlaySize);
     }
 
     private void UpdateLiveActivity()
@@ -267,6 +287,13 @@ internal sealed class StatusOverlayForm : Form
         return new Point(
             x,
             Math.Max(workingArea.Top + margin, workingArea.Bottom - overlaySize.Height - margin));
+    }
+
+    private void UseOverlaySize(Size size)
+    {
+        Size = size;
+        MinimumSize = size;
+        MaximumSize = size;
     }
 
     private sealed class ActivityMeterControl : Control
