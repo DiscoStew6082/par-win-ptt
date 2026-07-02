@@ -10,6 +10,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly AppSettingsStore _settingsStore = new(AppPaths.SettingsPath);
     private readonly WaveInAudioRecorder _recorder;
     private readonly DictationController _dictationController;
+    private readonly Icon _trayIcon;
     private readonly NotifyIcon _notifyIcon;
     private readonly RightCtrlHotkeySource _hotkeySource;
     private readonly StatusOverlayForm _statusOverlay = new();
@@ -40,9 +41,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _history,
             ShowTranscriptPreview);
 
+        _trayIcon = TrayIconFactory.Create();
         _notifyIcon = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = _trayIcon,
             Text = "Parakeet PTT",
             Visible = true,
             ContextMenuStrip = BuildMenu()
@@ -340,6 +342,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _hotkeySource.Dispose();
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
+        _trayIcon.Dispose();
         _statusOverlay.Dispose();
         _settingsForm?.Dispose();
         _historyForm?.Dispose();

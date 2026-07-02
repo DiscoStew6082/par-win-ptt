@@ -117,6 +117,27 @@ public sealed class AppBehaviorTests
     }
 
     [TestMethod]
+    public void StatusOverlayActivityMeterUsesFixedVerticalResponseProfile()
+    {
+        RunOnStaThread(() =>
+        {
+            using var overlay = new StatusOverlayForm();
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Listening);
+
+            overlay.UpdateActivityLevelForTest(0.75);
+            var firstProfile = overlay.ActivityMeterBarHeightsForTest;
+
+            overlay.UpdateActivityLevelForTest(0.75);
+            var secondProfile = overlay.ActivityMeterBarHeightsForTest;
+
+            var center = firstProfile.Length / 2;
+            Assert.IsTrue(firstProfile[center] > firstProfile[0]);
+            Assert.IsTrue(firstProfile[center] > firstProfile[^1]);
+            CollectionAssert.AreEqual(firstProfile, secondProfile);
+        });
+    }
+
+    [TestMethod]
     public void StatusOverlayDecaysMicrophoneLevelInsteadOfAnimatingFakeMotion()
     {
         RunOnStaThread(() =>

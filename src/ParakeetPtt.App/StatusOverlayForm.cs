@@ -99,6 +99,8 @@ internal sealed class StatusOverlayForm : Form
 
     internal bool HasActivityHistoryForTest => _activityMeter.HasHistory;
 
+    internal int[] ActivityMeterBarHeightsForTest => _activityMeter.BarHeightsForTest;
+
     internal string TitleTextForTest => _title.Text;
 
     internal string MessageTextForTest => _message.Text;
@@ -269,8 +271,9 @@ internal sealed class StatusOverlayForm : Form
 
     private sealed class ActivityMeterControl : Control
     {
-        private readonly double[] _levels = new double[18];
-        private int _nextLevelIndex;
+        private const int BarCount = 18;
+        private const int Gap = 5;
+        private const int MinimumBarHeight = 5;
         private double _level;
 
         public ActivityMeterControl()
@@ -285,18 +288,16 @@ internal sealed class StatusOverlayForm : Form
             set
             {
                 _level = Math.Clamp(value, 0, 1);
-                _levels[_nextLevelIndex] = _level;
-                _nextLevelIndex = (_nextLevelIndex + 1) % _levels.Length;
                 Invalidate();
             }
         }
 
-        public bool HasHistory => _levels.Any(level => level > 0);
+        public bool HasHistory => _level > 0;
+
+        public int[] BarHeightsForTest => CalculateBarHeights();
 
         public void Reset()
         {
-            Array.Clear(_levels);
-            _nextLevelIndex = 0;
             _level = 0;
             Invalidate();
         }
@@ -305,10 +306,6 @@ internal sealed class StatusOverlayForm : Form
         {
             const double decay = 0.82;
             _level *= decay;
-            for (var i = 0; i < _levels.Length; i++)
-            {
-                _levels[i] *= decay;
-            }
 
             Invalidate();
         }
@@ -318,26 +315,44 @@ internal sealed class StatusOverlayForm : Form
             base.OnPaint(e);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
-            const int barCount = 18;
-            const int gap = 5;
-            var availableWidth = Math.Max(1, Width - (barCount - 1) * gap);
-            var barWidth = Math.Max(4, availableWidth / barCount);
-            var maxHeight = Math.Max(8, Height - 6);
+            var availableWidth = Math.Max(1, Width - (BarCount - 1) * Gap);
+            var barWidth = Math.Max(4, availableWidth / BarCount);
             var yCenter = Height / 2;
+            var barHeights = CalculateBarHeights();
+            var visualLevel = VisualLevel(_level);
 
             using var inactive = new SolidBrush(Color.FromArgb(54, DarkTheme.MutedText));
 
-            for (var i = 0; i < barCount; i++)
+            for (var i = 0; i < BarCount; i++)
             {
-                var index = (_nextLevelIndex + i) % _levels.Length;
-                var level = _levels[index];
-                var barHeight = Math.Max(5, (int)(6 + level * (maxHeight - 6)));
-                var x = i * (barWidth + gap);
+                var barHeight = barHeights[i];
+                var x = i * (barWidth + Gap);
                 var y = yCenter - barHeight / 2;
-                using var active = new SolidBrush(Color.FromArgb((int)(70 + level * 185), DarkTheme.Accent));
-                var brush = level > 0.03 ? active : inactive;
+                using var active = new SolidBrush(Color.FromArgb((int)(70 + visualLevel * 185), DarkTheme.Accent));
+                var brush = _level > 0.03 ? active : inactive;
                 FillRoundedRectangle(e.Graphics, brush, new Rectangle(x, y, barWidth, barHeight), 3);
             }
+        }
+
+        private int[] CalculateBarHeights()
+        {
+            var maxHeight = Math.Max(8, Height - 6);
+            var visualLevel = VisualLevel(_level);
+            var heights = new int[BarCount];
+
+            for (var i = 0; i < heights.Length; i++)
+            {
+                var centerWeight = Math.Sin(Math.PI * (i + 0.5) / heights.Length);
+                var gain = 0.25 + centerWeight * 0.75;
+                heights[i] = Math.Max(MinimumBarHeight, (int)Math.Round(MinimumBarHeight + visualLevel * gain * (maxHeight - MinimumBarHeight)));
+            }
+
+            return heights;
+        }
+
+        private static double VisualLevel(double level)
+        {
+            return Math.Sqrt(Math.Clamp(level, 0, 1));
         }
 
         private static void FillRoundedRectangle(Graphics graphics, Brush brush, Rectangle bounds, int radius)
