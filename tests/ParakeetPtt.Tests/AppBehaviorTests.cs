@@ -54,6 +54,34 @@ public sealed class AppBehaviorTests
     }
 
     [TestMethod]
+    public void ListeningStatusFormatterShowsElapsedTimeAndReleaseHint()
+    {
+        var text = ListeningStatusFormatter.Format(TimeSpan.FromMinutes(61) + TimeSpan.FromSeconds(5));
+
+        Assert.AreEqual("Recording 61:05 - release Right Ctrl to transcribe.", text);
+    }
+
+    [TestMethod]
+    public void StatusOverlayRunsLiveActivityOnlyWhileListening()
+    {
+        RunOnStaThread(() =>
+        {
+            using var overlay = new StatusOverlayForm();
+
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Listening);
+
+            Assert.IsTrue(overlay.LiveActivityTimerEnabledForTest);
+            Assert.IsTrue(overlay.ActivityMeterVisibleForTest);
+            StringAssert.Contains(overlay.MessageTextForTest, "Recording 00:00");
+
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Transcribing);
+
+            Assert.IsFalse(overlay.LiveActivityTimerEnabledForTest);
+            Assert.IsFalse(overlay.ActivityMeterVisibleForTest);
+        });
+    }
+
+    [TestMethod]
     public void StatusOverlayPositionsAtBottomCenterOfWorkingArea()
     {
         var location = StatusOverlayForm.CalculateBottomCenterLocationForTest(

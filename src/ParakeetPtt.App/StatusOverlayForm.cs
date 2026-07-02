@@ -1,4 +1,5 @@
 using ParakeetPtt.Core;
+using System.Drawing.Drawing2D;
 
 namespace ParakeetPtt.App;
 
@@ -11,7 +12,12 @@ internal sealed class StatusOverlayForm : Form
     private readonly Panel _accent = new();
     private readonly Label _title = new();
     private readonly Label _message = new();
+    private readonly ActivityMeterControl _activityMeter = new();
     private readonly System.Windows.Forms.Timer _hideTimer = new();
+    private readonly System.Windows.Forms.Timer _liveActivityTimer = new();
+    private DateTimeOffset _listeningStartedAt;
+    private int _activityPhase;
+    private bool _activityMeterRequestedVisible;
 
     public StatusOverlayForm()
     {
@@ -22,8 +28,8 @@ internal sealed class StatusOverlayForm : Form
         Size = DefaultOverlaySize;
         MinimumSize = Size;
         MaximumSize = Size;
-        Padding = new Padding(0);
-        BackColor = DarkTheme.Surface;
+        Padding = new Padding(1);
+        BackColor = DarkTheme.Border;
         ForeColor = DarkTheme.Text;
         Font = DarkTheme.BodyFont;
 
@@ -47,12 +53,17 @@ internal sealed class StatusOverlayForm : Form
         _message.TextAlign = ContentAlignment.MiddleLeft;
         _message.AutoEllipsis = true;
 
+        _activityMeter.Dock = DockStyle.Bottom;
+        _activityMeter.Height = 24;
+        _activityMeter.Visible = false;
+
         var content = new Panel
         {
             Dock = DockStyle.Fill,
             Padding = new Padding(16, 12, 16, 14),
             BackColor = DarkTheme.Surface
         };
+        content.Controls.Add(_activityMeter);
         content.Controls.Add(_message);
         content.Controls.Add(_title);
 
@@ -64,6 +75,9 @@ internal sealed class StatusOverlayForm : Form
             _hideTimer.Stop();
             Hide();
         };
+
+        _liveActivityTimer.Interval = 200;
+        _liveActivityTimer.Tick += (_, _) => UpdateLiveActivity();
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -77,6 +91,10 @@ internal sealed class StatusOverlayForm : Form
     internal int ExtendedWindowStyleForTest => CreateParams.ExStyle;
 
     internal bool AutoHideTimerEnabledForTest => _hideTimer.Enabled;
+
+    internal bool LiveActivityTimerEnabledForTest => _liveActivityTimer.Enabled;
+
+    internal bool ActivityMeterVisibleForTest => _activityMeterRequestedVisible;
 
     internal string TitleTextForTest => _title.Text;
 
@@ -130,6 +148,7 @@ internal sealed class StatusOverlayForm : Form
         if (disposing)
         {
             _hideTimer.Dispose();
+            _liveActivityTimer.Dispose();
             _title.Dispose();
             _message.Dispose();
             _accent.Dispose();
@@ -154,6 +173,13 @@ internal sealed class StatusOverlayForm : Form
 
     private void ApplyStatus(DictationStatus status)
     {
+        if (status.Kind == DictationStatusKind.Listening)
+        {
+            StartLiveActivity(status);
+            return;
+        }
+
+        StopLiveActivity();
         _accent.BackColor = AccentFor(status.Kind);
         _title.Text = status.Title;
         _message.Text = status.Message;
@@ -168,6 +194,31 @@ internal sealed class StatusOverlayForm : Form
 
         _hideTimer.Interval = status.Kind == DictationStatusKind.Error ? 3500 : 1500;
         _hideTimer.Start();
+    }
+
+    private void StartLiveActivity(DictationStatus status)
+    {
+        _accent.BackColor = AccentFor(status.Kind);
+        _title.Text = status.Title;
+        _listeningStartedAt = DateTimeOffset.UtcNow;
+        _activityPhase = 0;
+        _activityMeterRequestedVisible = true;
+        _activityMeter.Visible = true;
+        UpdateLiveActivity();
+        _liveActivityTimer.Start();
+    }
+
+    private void StopLiveActivity()
+    {
+        _liveActivityTimer.Stop();
+        _activityMeterRequestedVisible = false;
+        _activityMeter.Visible = false;
+    }
+
+    private void UpdateLiveActivity()
+    {
+        _message.Text = ListeningStatusFormatter.Format(DateTimeOffset.UtcNow - _listeningStartedAt);
+        _activityMeter.Phase = _activityPhase++;
     }
 
     private void PositionBottomCenter()
@@ -191,5 +242,64 @@ internal sealed class StatusOverlayForm : Form
         return new Point(
             x,
             Math.Max(workingArea.Top + margin, workingArea.Bottom - overlaySize.Height - margin));
+    }
+
+    private sealed class ActivityMeterControl : Control
+    {
+        private int _phase;
+
+        public ActivityMeterControl()
+        {
+            DoubleBuffered = true;
+            BackColor = DarkTheme.Surface;
+        }
+
+        public int Phase
+        {
+            get => _phase;
+            set
+            {
+                _phase = value;
+                Invalidate();
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            const int barCount = 18;
+            const int gap = 5;
+            var availableWidth = Math.Max(1, Width - (barCount - 1) * gap);
+            var barWidth = Math.Max(4, availableWidth / barCount);
+            var maxHeight = Math.Max(8, Height - 6);
+            var yCenter = Height / 2;
+
+            using var inactive = new SolidBrush(Color.FromArgb(64, DarkTheme.MutedText));
+            using var active = new SolidBrush(DarkTheme.Accent);
+
+            for (var i = 0; i < barCount; i++)
+            {
+                var wave = (Math.Sin((_phase + i) * 0.7) + 1) / 2;
+                var barHeight = Math.Max(5, (int)(6 + wave * (maxHeight - 6)));
+                var x = i * (barWidth + gap);
+                var y = yCenter - barHeight / 2;
+                var brush = i % 3 == _phase % 3 ? active : inactive;
+                FillRoundedRectangle(e.Graphics, brush, new Rectangle(x, y, barWidth, barHeight), 3);
+            }
+        }
+
+        private static void FillRoundedRectangle(Graphics graphics, Brush brush, Rectangle bounds, int radius)
+        {
+            var diameter = radius * 2;
+            using var path = new GraphicsPath();
+            path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
+            path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
+            path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+            path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
+            path.CloseFigure();
+            graphics.FillPath(brush, path);
+        }
     }
 }
