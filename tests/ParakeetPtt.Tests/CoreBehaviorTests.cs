@@ -102,6 +102,21 @@ public sealed class CoreBehaviorTests
     }
 
     [TestMethod]
+    public async Task ProcessRunnerPreservesCallerCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var runner = new SystemProcessRunner();
+        var request = new ProcessRequest(
+            "cmd.exe",
+            ["/c", "ping", "127.0.0.1", "-n", "6"],
+            TimeSpan.FromSeconds(30));
+
+        await Assert.ThrowsExceptionAsync<OperationCanceledException>(
+            () => runner.RunAsync(request, cancellation.Token));
+    }
+
+    [TestMethod]
     public async Task SettingsRoundtripKeepsSelectedModelAndDevicePreference()
     {
         var path = Path.Combine(Path.GetTempPath(), $"parakeet-settings-{Guid.NewGuid():N}.json");

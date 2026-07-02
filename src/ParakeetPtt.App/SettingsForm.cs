@@ -16,6 +16,7 @@ internal sealed class SettingsForm : Form
     private AppSettings _settings = AppSettings.Default;
 
     public event EventHandler<AppSettings>? SettingsSaved;
+    public event EventHandler? QuitRequested;
 
     public SettingsForm(AppSettingsStore settingsStore, ModelRegistry modelRegistry)
     {
@@ -33,7 +34,13 @@ internal sealed class SettingsForm : Form
     public async Task LoadSettingsAsync(CancellationToken cancellationToken)
     {
         _settings = await _settingsStore.LoadAsync(cancellationToken);
-        ApplySettings(_settings);
+        UseSettings(_settings);
+    }
+
+    public void UseSettings(AppSettings settings)
+    {
+        _settings = settings;
+        ApplySettings(settings);
     }
 
     private void BuildLayout()
@@ -131,12 +138,18 @@ internal sealed class SettingsForm : Form
         save.BackColor = DarkTheme.Accent;
         save.Click += async (_, _) => await SaveAsync();
 
+        var quit = DarkTheme.Button("Quit App");
+        quit.Width = 96;
+        quit.BackColor = DarkTheme.Danger;
+        quit.Click += (_, _) => QuitRequested?.Invoke(this, EventArgs.Empty);
+
         var cancel = DarkTheme.Button("Cancel");
         cancel.Width = 96;
         cancel.Click += (_, _) => Hide();
 
         buttons.Controls.Add(save);
         buttons.Controls.Add(cancel);
+        buttons.Controls.Add(quit);
 
         var header = new TableLayoutPanel
         {

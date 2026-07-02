@@ -12,11 +12,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly NotifyIcon _notifyIcon;
     private readonly RightCtrlHotkeySource _hotkeySource;
     private readonly SynchronizationContext _uiContext;
+    private readonly CancellationTokenSource _lifetime = new();
     private SettingsForm? _settingsForm;
     private SessionHistoryForm? _historyForm;
     private AppSettings _settings = AppSettings.Default;
     private bool _exiting;
     private bool _acceptedRecordingStart;
+    private bool _settingsOpening;
 
     public TrayApplicationContext()
     {
@@ -41,6 +43,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
         };
 
         _notifyIcon.DoubleClick += (_, _) => ShowSettings();
+        _notifyIcon.MouseClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                ShowSettings();
+            }
+        };
         _hotkeySource = new RightCtrlHotkeySource();
         _hotkeySource.Pressed += () => PostToUi(OnHotkeyPressedAsync);
         _hotkeySource.Released += () => PostToUi(OnHotkeyReleasedAsync);
@@ -55,6 +64,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
             try
             {
                 await action();
+            }
+            catch (OperationCanceledException) when (_exiting)
+            {
             }
             catch (Exception ex)
             {
@@ -73,11 +85,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
             Renderer = new ToolStripProfessionalRenderer(new DarkMenuColorTable())
         };
 
-        menu.Items.Add(new ToolStripMenuItem("Settings", null, (_, _) => ShowSettings()));
+        menu.Items.Add(new ToolStripMenuItem("Open Settings", null, (_, _) => ShowSettings()));
         menu.Items.Add(new ToolStripMenuItem("Session History", null, (_, _) => ShowHistory()));
         menu.Items.Add(new ToolStripMenuItem("Play Test Sound", null, (_, _) => PlayStatusSound(StatusSound.Listening)));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitApplication()));
+        menu.Items.Add(new ToolStripMenuItem("Quit Parakeet PTT", null, (_, _) => ExitApplication()));
 
         return menu;
     }
@@ -86,8 +98,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         try
         {
-            _settings = await _settingsStore.LoadAsync(CancellationToken.None);
+            _settings = await _settingsStore.LoadAsync(_lifetime.Token);
             UpdateTrayText();
+        }
+        catch (OperationCanceledException) when (_exiting)
+        {
         }
         catch (Exception ex)
         {
@@ -97,6 +112,17 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void ShowSettings()
     {
+        if (_settingsOpening)
+        {
+            return;
+        }
+
+        if (_settingsForm is { Visible: true })
+        {
+            _settingsForm.Activate();
+            return;
+        }
+
         _settingsForm ??= CreateSettingsForm();
         _ = ShowSettingsAsync(_settingsForm);
     }
@@ -110,22 +136,54 @@ internal sealed class TrayApplicationContext : ApplicationContext
             UpdateTrayText();
             ShowTrayNotification("Settings saved", "Parakeet PTT settings were updated.", ToolTipIcon.Info);
         };
+        form.QuitRequested += (_, _) => ExitApplication();
         return form;
     }
 
     private async Task ShowSettingsAsync(SettingsForm form)
     {
-        await form.LoadSettingsAsync(CancellationToken.None);
-        form.Show();
-        form.Activate();
+        _settingsOpening = true;
+        try
+        {
+            await form.LoadSettingsAsync(_lifetime.Token);
+            if (!_exiting)
+            {
+                form.Show();
+                form.Activate();
+            }
+        }
+        catch (OperationCanceledException) when (_exiting)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (!_exiting)
+            {
+                ShowTrayNotification("Settings were not loaded", ex.Message, ToolTipIcon.Warning);
+                form.UseSettings(AppSettings.Default);
+                form.Show();
+                form.Activate();
+            }
+        }
+        finally
+        {
+            _settingsOpening = false;
+        }
     }
 
     private void ShowHistory()
     {
-        _historyForm ??= new SessionHistoryForm(_history);
+        _historyForm ??= CreateHistoryForm();
         _historyForm.RefreshItems();
         _historyForm.Show();
         _historyForm.Activate();
+    }
+
+    private SessionHistoryForm CreateHistoryForm()
+    {
+        var form = new SessionHistoryForm(_history);
+        form.QuitRequested += (_, _) => ExitApplication();
+        return form;
     }
 
     private async Task OnHotkeyPressedAsync()
@@ -135,7 +193,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             return;
         }
 
-        if (await _dictationController.HandleHotkeyDownAsync(CancellationToken.None))
+        if (await _dictationController.HandleHotkeyDownAsync(_lifetime.Token))
         {
             _acceptedRecordingStart = true;
             PlayStatusSound(StatusSound.Listening);
@@ -160,7 +218,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         ShowTrayNotification("Transcribing", "Sending audio to local parakeet-cli.", ToolTipIcon.Info);
         try
         {
-            var outcome = await _dictationController.HandleHotkeyUpAsync(CancellationToken.None);
+            var outcome = await _dictationController.HandleHotkeyUpAsync(_lifetime.Token);
             _historyForm?.RefreshItems();
             if (outcome == DictationOutcome.Pasted)
             {
@@ -171,6 +229,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
             {
                 ShowTrayNotification("No speech detected", "Nothing was pasted.", ToolTipIcon.Info);
             }
+        }
+        catch (OperationCanceledException) when (_exiting)
+        {
         }
         catch (Exception ex)
         {
@@ -225,12 +286,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void ExitApplication()
     {
+        if (_exiting)
+        {
+            return;
+        }
+
         _exiting = true;
+        _lifetime.Cancel();
         _hotkeySource.Dispose();
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
         _settingsForm?.Dispose();
         _historyForm?.Dispose();
+        _lifetime.Dispose();
         ExitThread();
     }
 }

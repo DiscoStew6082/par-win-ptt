@@ -7,6 +7,8 @@ internal sealed class SessionHistoryForm : Form
     private readonly SessionHistory _history;
     private readonly ListBox _items = new();
 
+    public event EventHandler? QuitRequested;
+
     public SessionHistoryForm(SessionHistory history)
     {
         _history = history;
@@ -72,9 +74,25 @@ internal sealed class SessionHistoryForm : Form
         closeButton.Anchor = AnchorStyles.Right;
         closeButton.Click += (_, _) => Hide();
 
+        var quitButton = DarkTheme.Button("Quit App");
+        quitButton.Width = 96;
+        quitButton.BackColor = DarkTheme.Danger;
+        quitButton.Anchor = AnchorStyles.Right;
+        quitButton.Click += (_, _) => QuitRequested?.Invoke(this, EventArgs.Empty);
+
+        var buttons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.RightToLeft,
+            AutoSize = true,
+            BackColor = DarkTheme.Background
+        };
+        buttons.Controls.Add(closeButton);
+        buttons.Controls.Add(quitButton);
+
         layout.Controls.Add(title, 0, 0);
         layout.Controls.Add(_items, 0, 1);
-        layout.Controls.Add(closeButton, 0, 2);
+        layout.Controls.Add(buttons, 0, 2);
 
         Controls.Add(layout);
     }

@@ -109,6 +109,11 @@ public sealed class SystemProcessRunner : IProcessRunner
             {
             }
 
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+
             throw new TimeoutException($"parakeet-cli did not finish within {request.Timeout}.");
         }
     }
