@@ -35,8 +35,8 @@ public sealed class ModelRegistry(IReadOnlyList<ModelInfo> models, string defaul
                     "tdt_ctc",
                     "F16",
                     new Uri("https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/tdt_ctc-110m-f16.gguf"),
-                    null,
-                    200_000_000),
+                    "7f9a6376edde6a74592ace48b2ebdc27a1ac972d0be9dfcc29e668d99381faf1",
+                    267_452_544),
                 new ModelInfo(
                     "tdt-0.6b-v3-f16",
                     "Parakeet TDT 0.6B v3 F16",
@@ -44,8 +44,8 @@ public sealed class ModelRegistry(IReadOnlyList<ModelInfo> models, string defaul
                     "tdt",
                     "F16",
                     new Uri("https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/tdt-0.6b-v3-f16.gguf"),
-                    null,
-                    1_000_000_000)
+                    "8ba47343e1e919895aca90e099150a01ed203ee0942d8ed31e27295efc5abb22",
+                    1_441_046_400)
             ],
             DefaultModelId);
     }

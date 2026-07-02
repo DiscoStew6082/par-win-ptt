@@ -76,16 +76,12 @@ public sealed class AssetManager(string rootDirectory, IFileDownloader downloade
     public async Task<string> EnsureRuntimeAsync(RuntimeAssetInfo asset, CancellationToken cancellationToken)
     {
         var runtimeDirectory = Path.Combine(rootDirectory, "runtimes", asset.Id);
-        var cliPath = FindCli(runtimeDirectory);
         Directory.CreateDirectory(runtimeDirectory);
 
-        if (cliPath is null)
-        {
-            await DownloadVerifyExtractAsync(
-                new RuntimeArchiveInfo(asset.DownloadUrl, asset.Sha256, asset.FileName),
-                runtimeDirectory,
-                cancellationToken);
-        }
+        await DownloadVerifyExtractAsync(
+            new RuntimeArchiveInfo(asset.DownloadUrl, asset.Sha256, asset.FileName),
+            runtimeDirectory,
+            cancellationToken);
 
         foreach (var archive in asset.AdditionalArchives)
         {
@@ -137,10 +133,14 @@ public sealed class AssetManager(string rootDirectory, IFileDownloader downloade
     private async Task DownloadVerifyExtractAsync(RuntimeArchiveInfo archive, string runtimeDirectory, CancellationToken cancellationToken)
     {
         var markerPath = Path.Combine(runtimeDirectory, $".{archive.FileName}.sha256");
+        var manifestPath = Path.Combine(runtimeDirectory, $".{archive.FileName}.manifest");
         if (File.Exists(markerPath)
             && string.Equals(await File.ReadAllTextAsync(markerPath, cancellationToken), archive.Sha256, StringComparison.OrdinalIgnoreCase))
         {
-            return;
+            if (await ManifestMatchesAsync(manifestPath, runtimeDirectory, cancellationToken))
+            {
+                return;
+            }
         }
 
         var downloadsDirectory = Path.Combine(rootDirectory, "downloads");
@@ -157,8 +157,10 @@ public sealed class AssetManager(string rootDirectory, IFileDownloader downloade
             throw new InvalidOperationException($"Downloaded runtime asset failed SHA-256 verification: {archive.FileName}");
         }
 
+        ValidateArchiveEntries(zipPath, runtimeDirectory);
         ZipFile.ExtractToDirectory(zipPath, runtimeDirectory, overwriteFiles: true);
         await File.WriteAllTextAsync(markerPath, archive.Sha256, cancellationToken);
+        await WriteManifestAsync(zipPath, manifestPath, runtimeDirectory, cancellationToken);
     }
 
     private async Task DownloadAtomicallyAsync(Uri source, string destinationPath, CancellationToken cancellationToken)
@@ -186,5 +188,79 @@ public sealed class AssetManager(string rootDirectory, IFileDownloader downloade
         }
 
         return model.Sha256 is null || await ChecksumVerifier.VerifySha256Async(path, model.Sha256, cancellationToken);
+    }
+
+    private static async Task<bool> ManifestMatchesAsync(string manifestPath, string runtimeDirectory, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(manifestPath))
+        {
+            return false;
+        }
+
+        foreach (var line in await File.ReadAllLinesAsync(manifestPath, cancellationToken))
+        {
+            var separator = line.IndexOf(' ');
+            if (separator != 64)
+            {
+                return false;
+            }
+
+            var expectedSha256 = line[..separator];
+            var relativePath = line[(separator + 1)..];
+            var targetPath = GetSafeTargetPath(runtimeDirectory, relativePath);
+            if (!File.Exists(targetPath)
+                || !await ChecksumVerifier.VerifySha256Async(targetPath, expectedSha256, cancellationToken))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static async Task WriteManifestAsync(
+        string zipPath,
+        string manifestPath,
+        string runtimeDirectory,
+        CancellationToken cancellationToken)
+    {
+        var lines = new List<string>();
+        using var zip = ZipFile.OpenRead(zipPath);
+        foreach (var entry in zip.Entries.Where(entry => !IsDirectoryEntry(entry)))
+        {
+            var targetPath = GetSafeTargetPath(runtimeDirectory, entry.FullName);
+            var sha256 = await ChecksumVerifier.ComputeSha256Async(targetPath, cancellationToken);
+            lines.Add($"{sha256} {entry.FullName.Replace('\\', '/')}");
+        }
+
+        await File.WriteAllLinesAsync(manifestPath, lines, cancellationToken);
+    }
+
+    private static void ValidateArchiveEntries(string zipPath, string runtimeDirectory)
+    {
+        using var zip = ZipFile.OpenRead(zipPath);
+        foreach (var entry in zip.Entries.Where(entry => !IsDirectoryEntry(entry)))
+        {
+            GetSafeTargetPath(runtimeDirectory, entry.FullName);
+        }
+    }
+
+    private static string GetSafeTargetPath(string runtimeDirectory, string relativePath)
+    {
+        var targetPath = Path.GetFullPath(Path.Combine(runtimeDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        var relativeToRuntime = Path.GetRelativePath(runtimeDirectory, targetPath);
+        if (Path.IsPathRooted(relativeToRuntime)
+            || string.Equals(relativeToRuntime, "..", StringComparison.Ordinal)
+            || relativeToRuntime.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Runtime archive entry escapes the runtime directory: {relativePath}");
+        }
+
+        return targetPath;
+    }
+
+    private static bool IsDirectoryEntry(ZipArchiveEntry entry)
+    {
+        return entry.FullName.EndsWith("/", StringComparison.Ordinal);
     }
 }

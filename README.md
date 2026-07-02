@@ -17,11 +17,20 @@ Parakeet PTT is a local Windows push-to-talk dictation tray app. Hold Right Ctrl
 
 Parakeet PTT is designed for local dictation. Temporary recordings are made on the local machine while dictation is active, transcription is performed by a local `parakeet-cli` runtime, and transcript history is session-only. The app does download runtime/model assets on first use unless you configure local paths in settings.
 
+Trust-boundary notes:
+
+- Paste is implemented through the Windows clipboard. The app temporarily places the transcript on the clipboard, sends paste to the active window, and attempts to restore the previous clipboard contents afterward. Other local apps with clipboard access may observe clipboard contents while paste is in progress.
+- Runtime and model path overrides execute the local files you select. Use overrides only for runtimes and models from sources you trust.
+- The push-to-talk hotkey uses a low-level Windows keyboard hook so the app can detect Right Ctrl while it is running. The hook is used for hotkey state, not transcript collection.
+- Runtime/model downloads leave the local machine to fetch third-party artifacts; transcription itself runs locally.
+
 ## Requirements
 
-- Windows 10 or later.
-- .NET 8 SDK for development.
+- Windows 11, or Windows 10 installations still receiving security updates.
+- .NET 10 SDK for development.
 - A working audio input device.
+
+Supported releases target Windows 10/11 on x64. The app targets .NET 10 LTS, which is supported until November 14, 2028.
 
 ## Build
 
@@ -41,6 +50,12 @@ Package the published folder as a zip:
 
 ```powershell
 Compress-Archive -Path publish\win-x64\* -DestinationPath publish\ParakeetPtt-win-x64.zip -Force
+```
+
+Create a checksum for release verification:
+
+```powershell
+Get-FileHash publish\ParakeetPtt-win-x64.zip -Algorithm SHA256
 ```
 
 ## Try It Locally
@@ -70,9 +85,19 @@ Open the tray menu for settings, session-only transcript history, and runtime/mo
 This repository is licensed under MIT. The runtime and model assets downloaded on first use are third-party artifacts from their upstream projects:
 
 - `parakeet.cpp` runtime archives are downloaded from the `mudler/parakeet.cpp` GitHub release `v0.4.0`. Runtime archives are verified with pinned SHA-256 hashes before extraction.
-- GGUF model files are downloaded from `mudler/parakeet-cpp-gguf` on Hugging Face. Model downloads are checked for minimum expected size; configure a local model path in settings if you need stricter supply-chain control.
+- GGUF model files are downloaded from `mudler/parakeet-cpp-gguf` on Hugging Face. Built-in model downloads are checked for minimum expected size and pinned SHA-256 hashes; configure a local model path in settings only when you trust that local model file.
 
 Review the upstream repositories for their own license terms before redistributing bundled runtime or model assets.
+
+## Release Verification
+
+Every published release should include a SHA-256 checksum for the downloadable zip. Users should compare the published checksum with:
+
+```powershell
+Get-FileHash .\ParakeetPtt-win-x64.zip -Algorithm SHA256
+```
+
+Recommended hardening for public releases includes code signing, SBOM publication, and build provenance such as GitHub artifact attestations or SLSA-compatible provenance.
 
 ## Validation
 

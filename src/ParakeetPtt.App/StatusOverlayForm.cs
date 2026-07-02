@@ -1,4 +1,5 @@
 using ParakeetPtt.Core;
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 
 namespace ParakeetPtt.App;
@@ -321,6 +322,7 @@ internal sealed class StatusOverlayForm : Form
             BackColor = DarkTheme.Surface;
         }
 
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public double Level
         {
             get => _level;

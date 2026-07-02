@@ -123,6 +123,34 @@ public sealed class CoreBehaviorTests
     }
 
     [TestMethod]
+    public async Task TemporaryRecordingDeleteFailurePublishesCleanupWarning()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"parakeet-ptt-{Guid.NewGuid():N}.wav");
+        await File.WriteAllTextAsync(tempPath, "fake wav");
+        File.SetAttributes(tempPath, FileAttributes.ReadOnly);
+        string? warningPath = null;
+        var controller = new DictationController(
+            new FakeAudioRecorder(tempPath, deleteAfterUse: true),
+            new FakeTranscriber("hello"),
+            new FakeClipboardPaster(),
+            new SessionHistory(),
+            cleanupWarningReady: path => warningPath = path);
+
+        var outcome = await controller.HandleHotkeyUpAsync(CancellationToken.None);
+
+        Assert.AreEqual(DictationOutcome.NotRecording, outcome);
+        Assert.IsNull(warningPath);
+
+        await controller.HandleHotkeyDownAsync(CancellationToken.None);
+        outcome = await controller.HandleHotkeyUpAsync(CancellationToken.None);
+
+        Assert.AreEqual(DictationOutcome.Pasted, outcome);
+        Assert.AreEqual(tempPath, warningPath);
+        File.SetAttributes(tempPath, FileAttributes.Normal);
+        File.Delete(tempPath);
+    }
+
+    [TestMethod]
     public async Task ParakeetCliTranscriberConstructsCommandAndParsesJson()
     {
         var runner = new FakeProcessRunner("""{"text":"hello from cli","duration":1.25,"confidence":0.88}""");
@@ -201,11 +229,14 @@ public sealed class CoreBehaviorTests
     public void ModelRegistryExposesCuratedDefaultAndMultilingualModel()
     {
         var registry = ModelRegistry.CreateDefault();
+        var multilingual = registry.Find("tdt-0.6b-v3-f16");
 
         Assert.AreEqual("tdt_ctc-110m-f16", registry.DefaultModel.Id);
-        Assert.IsNotNull(registry.Find("tdt-0.6b-v3-f16"));
+        Assert.IsNotNull(multilingual);
         StringAssert.Contains(registry.DefaultModel.DownloadUrl.ToString(), "tdt_ctc-110m-f16.gguf");
         Assert.IsTrue(registry.DefaultModel.MinimumBytes > 0);
+        Assert.AreEqual("7f9a6376edde6a74592ace48b2ebdc27a1ac972d0be9dfcc29e668d99381faf1", registry.DefaultModel.Sha256);
+        Assert.AreEqual("8ba47343e1e919895aca90e099150a01ed203ee0942d8ed31e27295efc5abb22", multilingual?.Sha256);
     }
 
     [TestMethod]
@@ -276,6 +307,60 @@ public sealed class CoreBehaviorTests
 
         Assert.IsTrue(File.Exists(cliPath));
         StringAssert.EndsWith(cliPath, "parakeet-cli.exe");
+        Directory.Delete(root, recursive: true);
+    }
+
+    [TestMethod]
+    public async Task AssetManagerRevalidatesExtractedRuntimeFiles()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"parakeet-assets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var zipPath = Path.Combine(root, "runtime.zip");
+        CreateRuntimeZip(zipPath);
+        var sha = await ChecksumVerifier.ComputeSha256Async(zipPath, CancellationToken.None);
+        var manager = new AssetManager(root, new FakeDownloader(await File.ReadAllBytesAsync(zipPath)));
+        var runtime = new RuntimeAssetInfo(
+            "test-runtime",
+            new Uri("https://example.invalid/runtime.zip"),
+            sha,
+            "runtime.zip",
+            DevicePreference.Cuda);
+        var cliPath = await manager.EnsureRuntimeAsync(runtime, CancellationToken.None);
+        await File.WriteAllTextAsync(cliPath, "tampered");
+
+        var repairedCliPath = await manager.EnsureRuntimeAsync(runtime, CancellationToken.None);
+
+        Assert.AreEqual(cliPath, repairedCliPath);
+        Assert.AreEqual("fake exe", await File.ReadAllTextAsync(repairedCliPath));
+        Directory.Delete(root, recursive: true);
+    }
+
+    [TestMethod]
+    public async Task AssetManagerRejectsRuntimeArchiveEntriesOutsideRuntimeDirectory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"parakeet-assets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var zipPath = Path.Combine(root, "runtime.zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry("../evil.txt");
+            await using var stream = entry.Open();
+            await using var writer = new StreamWriter(stream);
+            await writer.WriteAsync("escape");
+        }
+
+        var sha = await ChecksumVerifier.ComputeSha256Async(zipPath, CancellationToken.None);
+        var manager = new AssetManager(root, new FakeDownloader(await File.ReadAllBytesAsync(zipPath)));
+        var runtime = new RuntimeAssetInfo(
+            "test-runtime",
+            new Uri("https://example.invalid/runtime.zip"),
+            sha,
+            "runtime.zip",
+            DevicePreference.Cuda);
+
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+            () => manager.EnsureRuntimeAsync(runtime, CancellationToken.None));
+        Assert.IsFalse(File.Exists(Path.Combine(root, "evil.txt")));
         Directory.Delete(root, recursive: true);
     }
 

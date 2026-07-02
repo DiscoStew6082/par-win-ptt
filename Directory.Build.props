@@ -8,5 +8,7 @@
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/discostew6082/par-win-ptt</RepositoryUrl>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
   </PropertyGroup>
 </Project>

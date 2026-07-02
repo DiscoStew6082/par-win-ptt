@@ -5,7 +5,8 @@ public sealed class DictationController(
     ITranscriber transcriber,
     IClipboardPaster clipboardPaster,
     SessionHistory history,
-    Action<string>? transcriptPreviewReady = null)
+    Action<string>? transcriptPreviewReady = null,
+    Action<string>? cleanupWarningReady = null)
 {
     private bool _isRecording;
     private bool _isProcessing;
@@ -52,14 +53,17 @@ public sealed class DictationController(
         {
             if (audio is { DeleteAfterUse: true })
             {
-                TryDelete(audio.Path);
+                if (!TryDelete(audio.Path))
+                {
+                    TryPublishCleanupWarning(audio.Path);
+                }
             }
 
             _isProcessing = false;
         }
     }
 
-    private static void TryDelete(string path)
+    private static bool TryDelete(string path)
     {
         try
         {
@@ -67,12 +71,16 @@ public sealed class DictationController(
             {
                 File.Delete(path);
             }
+
+            return true;
         }
         catch (IOException)
         {
+            return false;
         }
         catch (UnauthorizedAccessException)
         {
+            return false;
         }
     }
 
@@ -81,6 +89,17 @@ public sealed class DictationController(
         try
         {
             transcriptPreviewReady?.Invoke(text);
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private void TryPublishCleanupWarning(string path)
+    {
+        try
+        {
+            cleanupWarningReady?.Invoke(path);
         }
         catch (Exception)
         {

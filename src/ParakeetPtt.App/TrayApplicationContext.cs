@@ -40,7 +40,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 message => ShowTrayNotification("Parakeet PTT", message, ToolTipIcon.Info)),
             new ClipboardPaster(),
             _history,
-            ShowTranscriptPreview);
+            ShowTranscriptPreview,
+            ShowCleanupWarning);
 
         _trayIcon = TrayIconFactory.Create();
         _notifyIcon = new NotifyIcon
@@ -310,6 +311,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         _lastTranscriptPreview = transcript;
         ShowStatus(DictationStatusCatalog.TranscriptPreview(transcript), ToolTipIcon.Info, notify: false);
+    }
+
+    private void ShowCleanupWarning(string path)
+    {
+        ShowTrayNotification(
+            "Temporary audio remains",
+            $"Could not delete {Path.GetFileName(path)} from local app data.",
+            ToolTipIcon.Warning);
     }
 
     private void ShowStatus(
