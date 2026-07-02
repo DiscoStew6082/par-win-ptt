@@ -117,6 +117,22 @@ public sealed class AppBehaviorTests
     }
 
     [TestMethod]
+    public void StatusOverlayDecaysMicrophoneLevelInsteadOfAnimatingFakeMotion()
+    {
+        RunOnStaThread(() =>
+        {
+            using var overlay = new StatusOverlayForm();
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Listening);
+            overlay.UpdateActivityLevelForTest(0.8);
+
+            overlay.AdvanceLiveActivityForTest();
+
+            Assert.IsTrue(overlay.LatestActivityLevelForTest < 0.8);
+            Assert.IsTrue(overlay.LatestActivityLevelForTest > 0);
+        });
+    }
+
+    [TestMethod]
     public void StatusOverlayIgnoresMicrophoneLevelWhenNotListening()
     {
         RunOnStaThread(() =>

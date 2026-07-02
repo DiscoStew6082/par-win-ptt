@@ -16,7 +16,6 @@ internal sealed class StatusOverlayForm : Form
     private readonly System.Windows.Forms.Timer _hideTimer = new();
     private readonly System.Windows.Forms.Timer _liveActivityTimer = new();
     private DateTimeOffset _listeningStartedAt;
-    private int _activityPhase;
     private bool _activityMeterRequestedVisible;
 
     public StatusOverlayForm()
@@ -152,6 +151,11 @@ internal sealed class StatusOverlayForm : Form
         UpdateActivityLevel(level);
     }
 
+    internal void AdvanceLiveActivityForTest()
+    {
+        UpdateLiveActivity();
+    }
+
     public void UpdateActivityLevel(double level)
     {
         if (!_activityMeterRequestedVisible || IsDisposed)
@@ -220,7 +224,6 @@ internal sealed class StatusOverlayForm : Form
         _accent.BackColor = AccentFor(status.Kind);
         _title.Text = status.Title;
         _listeningStartedAt = DateTimeOffset.UtcNow;
-        _activityPhase = 0;
         _activityMeterRequestedVisible = true;
         _activityMeter.Visible = true;
         _activityMeter.Reset();
@@ -238,7 +241,7 @@ internal sealed class StatusOverlayForm : Form
     private void UpdateLiveActivity()
     {
         _message.Text = ListeningStatusFormatter.Format(DateTimeOffset.UtcNow - _listeningStartedAt);
-        _activityMeter.Phase = _activityPhase++;
+        _activityMeter.Decay();
     }
 
     private void PositionBottomCenter()
@@ -267,7 +270,7 @@ internal sealed class StatusOverlayForm : Form
     private sealed class ActivityMeterControl : Control
     {
         private readonly double[] _levels = new double[18];
-        private int _phase;
+        private int _nextLevelIndex;
         private double _level;
 
         public ActivityMeterControl()
@@ -276,23 +279,14 @@ internal sealed class StatusOverlayForm : Form
             BackColor = DarkTheme.Surface;
         }
 
-        public int Phase
-        {
-            get => _phase;
-            set
-            {
-                _phase = value;
-                Invalidate();
-            }
-        }
-
         public double Level
         {
             get => _level;
             set
             {
                 _level = Math.Clamp(value, 0, 1);
-                _levels[_phase % _levels.Length] = _level;
+                _levels[_nextLevelIndex] = _level;
+                _nextLevelIndex = (_nextLevelIndex + 1) % _levels.Length;
                 Invalidate();
             }
         }
@@ -302,7 +296,20 @@ internal sealed class StatusOverlayForm : Form
         public void Reset()
         {
             Array.Clear(_levels);
+            _nextLevelIndex = 0;
             _level = 0;
+            Invalidate();
+        }
+
+        public void Decay()
+        {
+            const double decay = 0.82;
+            _level *= decay;
+            for (var i = 0; i < _levels.Length; i++)
+            {
+                _levels[i] *= decay;
+            }
+
             Invalidate();
         }
 
@@ -318,18 +325,17 @@ internal sealed class StatusOverlayForm : Form
             var maxHeight = Math.Max(8, Height - 6);
             var yCenter = Height / 2;
 
-            using var inactive = new SolidBrush(Color.FromArgb(64, DarkTheme.MutedText));
-            using var active = new SolidBrush(DarkTheme.Accent);
+            using var inactive = new SolidBrush(Color.FromArgb(54, DarkTheme.MutedText));
 
             for (var i = 0; i < barCount; i++)
             {
-                var index = (_phase + i) % _levels.Length;
-                var age = (_levels.Length - i) / (double)_levels.Length;
-                var level = Math.Max(_levels[index] * age, _level * 0.18);
+                var index = (_nextLevelIndex + i) % _levels.Length;
+                var level = _levels[index];
                 var barHeight = Math.Max(5, (int)(6 + level * (maxHeight - 6)));
                 var x = i * (barWidth + gap);
                 var y = yCenter - barHeight / 2;
-                var brush = i % 3 == _phase % 3 ? active : inactive;
+                using var active = new SolidBrush(Color.FromArgb((int)(70 + level * 185), DarkTheme.Accent));
+                var brush = level > 0.03 ? active : inactive;
                 FillRoundedRectangle(e.Graphics, brush, new Rectangle(x, y, barWidth, barHeight), 3);
             }
         }
