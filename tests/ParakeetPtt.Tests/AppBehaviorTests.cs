@@ -62,6 +62,27 @@ public sealed class AppBehaviorTests
     }
 
     [TestMethod]
+    public void AudioLevelCalculatorConvertsPcmSamplesToNormalizedPeak()
+    {
+        var pcm = new byte[6];
+        WriteInt16(pcm, 0, 0);
+        WriteInt16(pcm, 2, short.MaxValue / 2);
+        WriteInt16(pcm, 4, short.MinValue);
+
+        var level = AudioLevelCalculator.CalculatePeakLevel(pcm);
+
+        Assert.AreEqual(1.0, level, 0.001);
+    }
+
+    [TestMethod]
+    public void AudioLevelCalculatorHandlesSilenceAndOddByteCount()
+    {
+        var level = AudioLevelCalculator.CalculatePeakLevel([0, 0, 255]);
+
+        Assert.AreEqual(0, level);
+    }
+
+    [TestMethod]
     public void StatusOverlayRunsLiveActivityOnlyWhileListening()
     {
         RunOnStaThread(() =>
@@ -78,6 +99,51 @@ public sealed class AppBehaviorTests
 
             Assert.IsFalse(overlay.LiveActivityTimerEnabledForTest);
             Assert.IsFalse(overlay.ActivityMeterVisibleForTest);
+        });
+    }
+
+    [TestMethod]
+    public void StatusOverlayActivityMeterStoresLatestMicrophoneLevel()
+    {
+        RunOnStaThread(() =>
+        {
+            using var overlay = new StatusOverlayForm();
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Listening);
+
+            overlay.UpdateActivityLevelForTest(0.75);
+
+            Assert.AreEqual(0.75, overlay.LatestActivityLevelForTest, 0.001);
+        });
+    }
+
+    [TestMethod]
+    public void StatusOverlayIgnoresMicrophoneLevelWhenNotListening()
+    {
+        RunOnStaThread(() =>
+        {
+            using var overlay = new StatusOverlayForm();
+
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Transcribing);
+            overlay.UpdateActivityLevelForTest(0.75);
+
+            Assert.AreEqual(0, overlay.LatestActivityLevelForTest);
+        });
+    }
+
+    [TestMethod]
+    public void StatusOverlayResetsActivityMeterForEachListeningSession()
+    {
+        RunOnStaThread(() =>
+        {
+            using var overlay = new StatusOverlayForm();
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Listening);
+            overlay.UpdateActivityLevelForTest(0.75);
+
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Transcribing);
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Listening);
+
+            Assert.AreEqual(0, overlay.LatestActivityLevelForTest);
+            Assert.IsFalse(overlay.HasActivityHistoryForTest);
         });
     }
 
@@ -124,5 +190,12 @@ public sealed class AppBehaviorTests
         {
             throw exception;
         }
+    }
+
+    private static void WriteInt16(byte[] buffer, int offset, short sample)
+    {
+        var bytes = BitConverter.GetBytes(sample);
+        buffer[offset] = bytes[0];
+        buffer[offset + 1] = bytes[1];
     }
 }

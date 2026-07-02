@@ -27,6 +27,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         _uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _recorder = new WaveInAudioRecorder(AppPaths.RootDirectory);
+        _recorder.AudioLevelChanged += OnAudioLevelChanged;
         _dictationController = new DictationController(
             _recorder,
             new LazyAssetTranscriber(
@@ -289,6 +290,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
+    private void OnAudioLevelChanged(double level)
+    {
+        _uiContext.Post(_ =>
+        {
+            if (_exiting || _statusOverlay.IsDisposed)
+            {
+                return;
+            }
+
+            _statusOverlay.UpdateActivityLevel(level);
+        }, null);
+    }
+
     private void PlayStatusSound(StatusSound sound)
     {
         if (!_settings.AudibleStatusEnabled)
@@ -322,6 +336,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _exiting = true;
         _lifetime.Cancel();
+        _recorder.AudioLevelChanged -= OnAudioLevelChanged;
         _hotkeySource.Dispose();
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();

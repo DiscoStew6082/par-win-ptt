@@ -25,6 +25,8 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
     private bool _disposed;
     private bool _disposeRequested;
 
+    public event Action<double>? AudioLevelChanged;
+
     public WaveInAudioRecorder()
         : this(Path.GetTempPath())
     {
@@ -291,6 +293,7 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
             return;
         }
 
+        double? level = null;
         lock (_gate)
         {
             if (_pcm is null)
@@ -304,12 +307,18 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
                 var data = new byte[header.BytesRecorded];
                 Marshal.Copy(header.Data, data, 0, data.Length);
                 _pcm.Write(data, 0, data.Length);
+                level = AudioLevelCalculator.CalculatePeakLevel(data);
             }
 
             if (_recording && !_stopping)
             {
                 waveInAddBuffer(hwi, dwParam1, Marshal.SizeOf<WaveHdr>());
             }
+        }
+
+        if (level.HasValue)
+        {
+            AudioLevelChanged?.Invoke(level.Value);
         }
     }
 

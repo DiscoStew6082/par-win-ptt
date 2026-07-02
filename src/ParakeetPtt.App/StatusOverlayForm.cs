@@ -96,6 +96,10 @@ internal sealed class StatusOverlayForm : Form
 
     internal bool ActivityMeterVisibleForTest => _activityMeterRequestedVisible;
 
+    internal double LatestActivityLevelForTest => _activityMeter.Level;
+
+    internal bool HasActivityHistoryForTest => _activityMeter.HasHistory;
+
     internal string TitleTextForTest => _title.Text;
 
     internal string MessageTextForTest => _message.Text;
@@ -141,6 +145,21 @@ internal sealed class StatusOverlayForm : Form
         _hideTimer.Stop();
         ApplyStatus(status);
         StartAutoHideIfNeeded(status);
+    }
+
+    internal void UpdateActivityLevelForTest(double level)
+    {
+        UpdateActivityLevel(level);
+    }
+
+    public void UpdateActivityLevel(double level)
+    {
+        if (!_activityMeterRequestedVisible || IsDisposed)
+        {
+            return;
+        }
+
+        _activityMeter.Level = level;
     }
 
     protected override void Dispose(bool disposing)
@@ -204,6 +223,7 @@ internal sealed class StatusOverlayForm : Form
         _activityPhase = 0;
         _activityMeterRequestedVisible = true;
         _activityMeter.Visible = true;
+        _activityMeter.Reset();
         UpdateLiveActivity();
         _liveActivityTimer.Start();
     }
@@ -246,7 +266,9 @@ internal sealed class StatusOverlayForm : Form
 
     private sealed class ActivityMeterControl : Control
     {
+        private readonly double[] _levels = new double[18];
         private int _phase;
+        private double _level;
 
         public ActivityMeterControl()
         {
@@ -262,6 +284,26 @@ internal sealed class StatusOverlayForm : Form
                 _phase = value;
                 Invalidate();
             }
+        }
+
+        public double Level
+        {
+            get => _level;
+            set
+            {
+                _level = Math.Clamp(value, 0, 1);
+                _levels[_phase % _levels.Length] = _level;
+                Invalidate();
+            }
+        }
+
+        public bool HasHistory => _levels.Any(level => level > 0);
+
+        public void Reset()
+        {
+            Array.Clear(_levels);
+            _level = 0;
+            Invalidate();
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -281,8 +323,10 @@ internal sealed class StatusOverlayForm : Form
 
             for (var i = 0; i < barCount; i++)
             {
-                var wave = (Math.Sin((_phase + i) * 0.7) + 1) / 2;
-                var barHeight = Math.Max(5, (int)(6 + wave * (maxHeight - 6)));
+                var index = (_phase + i) % _levels.Length;
+                var age = (_levels.Length - i) / (double)_levels.Length;
+                var level = Math.Max(_levels[index] * age, _level * 0.18);
+                var barHeight = Math.Max(5, (int)(6 + level * (maxHeight - 6)));
                 var x = i * (barWidth + gap);
                 var y = yCenter - barHeight / 2;
                 var brush = i % 3 == _phase % 3 ? active : inactive;
