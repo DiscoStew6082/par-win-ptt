@@ -195,6 +195,17 @@ public sealed class CoreBehaviorTests
     }
 
     [TestMethod]
+    public void DictationStatusCatalogProvidesVisibleTranscribingState()
+    {
+        var status = DictationStatusCatalog.Transcribing;
+
+        Assert.AreEqual(DictationStatusKind.Transcribing, status.Kind);
+        Assert.AreEqual("Transcribing", status.Title);
+        Assert.AreEqual("Sending audio to local parakeet-cli.", status.Message);
+        Assert.IsFalse(status.AutoHide);
+    }
+
+    [TestMethod]
     public async Task AssetManagerDownloadsVerifiesExtractsRuntimeAndFindsCli()
     {
         var root = Path.Combine(Path.GetTempPath(), $"parakeet-assets-{Guid.NewGuid():N}");

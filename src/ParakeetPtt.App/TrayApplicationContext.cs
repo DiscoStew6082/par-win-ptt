@@ -12,6 +12,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly DictationController _dictationController;
     private readonly NotifyIcon _notifyIcon;
     private readonly RightCtrlHotkeySource _hotkeySource;
+    private readonly StatusOverlayForm _statusOverlay = new();
     private readonly SynchronizationContext _uiContext;
     private readonly CancellationTokenSource _lifetime = new();
     private SettingsForm? _settingsForm;
@@ -72,7 +73,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
             catch (Exception ex)
             {
-                ShowTrayNotification("Parakeet PTT error", ex.Message, ToolTipIcon.Error);
+                var status = DictationStatusCatalog.Error(ex.Message);
+                ShowStatus(status, ToolTipIcon.Error);
                 PlayStatusSound(StatusSound.Error);
             }
         }, null);
@@ -199,7 +201,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             _acceptedRecordingStart = true;
             PlayStatusSound(StatusSound.Listening);
-            ShowTrayNotification("Listening", "Release Right Ctrl to transcribe.", ToolTipIcon.Info);
+            ShowStatus(DictationStatusCatalog.Listening, ToolTipIcon.Info);
         }
     }
 
@@ -217,7 +219,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _acceptedRecordingStart = false;
         PlayStatusSound(StatusSound.Transcribing);
-        ShowTrayNotification("Transcribing", "Sending audio to local parakeet-cli.", ToolTipIcon.Info);
+        ShowStatus(DictationStatusCatalog.Transcribing, ToolTipIcon.Info);
         try
         {
             var outcome = await _dictationController.HandleHotkeyUpAsync(_lifetime.Token);
@@ -225,11 +227,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
             if (outcome == DictationOutcome.Pasted)
             {
                 PlayStatusSound(StatusSound.Done);
-                ShowTrayNotification("Pasted", "Transcript pasted into the active app.", ToolTipIcon.Info);
+                ShowStatus(DictationStatusCatalog.Pasted, ToolTipIcon.Info);
             }
             else if (outcome == DictationOutcome.EmptyTranscript)
             {
-                ShowTrayNotification("No speech detected", "Nothing was pasted.", ToolTipIcon.Info);
+                ShowStatus(DictationStatusCatalog.EmptyTranscript, ToolTipIcon.Info);
             }
         }
         catch (OperationCanceledException) when (_exiting)
@@ -238,7 +240,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         catch (Exception ex)
         {
             PlayStatusSound(StatusSound.Error);
-            ShowTrayNotification("Dictation failed", ex.Message, ToolTipIcon.Error);
+            ShowStatus(DictationStatusCatalog.Error(ex.Message), ToolTipIcon.Error);
         }
     }
 
@@ -260,6 +262,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _notifyIcon.BalloonTipText = message;
         _notifyIcon.BalloonTipIcon = icon;
         _notifyIcon.ShowBalloonTip(2500);
+    }
+
+    private void ShowStatus(DictationStatus status, ToolTipIcon icon)
+    {
+        _statusOverlay.ShowStatus(status);
+        ShowTrayNotification(status.Title, status.Message, icon);
     }
 
     private void PlayStatusSound(StatusSound sound)
@@ -298,6 +306,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _hotkeySource.Dispose();
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
+        _statusOverlay.Dispose();
         _settingsForm?.Dispose();
         _historyForm?.Dispose();
         _ = Task.Run(_recorder.Dispose);
