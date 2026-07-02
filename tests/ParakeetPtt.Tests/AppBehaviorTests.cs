@@ -17,6 +17,7 @@ public sealed class AppBehaviorTests
             Assert.IsTrue((overlay.ExtendedWindowStyleForTest & StatusOverlayForm.NoActivateExtendedStyleForTest) != 0);
             Assert.IsTrue(overlay.TopMost);
             Assert.IsFalse(overlay.ShowInTaskbar);
+            Assert.AreEqual(FormStartPosition.Manual, overlay.StartPosition);
         });
     }
 

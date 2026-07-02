@@ -17,6 +17,7 @@ internal sealed class StatusOverlayForm : Form
     {
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
+        StartPosition = FormStartPosition.Manual;
         TopMost = true;
         Size = DefaultOverlaySize;
         MinimumSize = Size;
