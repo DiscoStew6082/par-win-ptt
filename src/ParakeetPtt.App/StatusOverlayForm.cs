@@ -18,6 +18,7 @@ internal sealed class StatusOverlayForm : Form
     private readonly System.Windows.Forms.Timer _hideTimer = new();
     private readonly System.Windows.Forms.Timer _liveActivityTimer = new();
     private DateTimeOffset _listeningStartedAt;
+    private ListeningTriggerMode _listeningTriggerMode = ListeningTriggerMode.PushToTalk;
     private bool _activityMeterRequestedVisible;
 
     public StatusOverlayForm()
@@ -146,8 +147,13 @@ internal sealed class StatusOverlayForm : Form
 
     public void ShowStatus(DictationStatus status)
     {
+        ShowStatus(status, ListeningTriggerMode.PushToTalk);
+    }
+
+    public void ShowStatus(DictationStatus status, ListeningTriggerMode mode)
+    {
         _hideTimer.Stop();
-        ApplyStatus(status);
+        ApplyStatus(status, mode);
         PositionBottomCenter();
 
         if (!Visible)
@@ -160,8 +166,13 @@ internal sealed class StatusOverlayForm : Form
 
     internal void ApplyStatusForTest(DictationStatus status)
     {
+        ApplyStatusForTest(status, ListeningTriggerMode.PushToTalk);
+    }
+
+    internal void ApplyStatusForTest(DictationStatus status, ListeningTriggerMode mode)
+    {
         _hideTimer.Stop();
-        ApplyStatus(status);
+        ApplyStatus(status, mode);
         StartAutoHideIfNeeded(status);
     }
 
@@ -214,11 +225,11 @@ internal sealed class StatusOverlayForm : Form
         };
     }
 
-    private void ApplyStatus(DictationStatus status)
+    private void ApplyStatus(DictationStatus status, ListeningTriggerMode mode)
     {
         if (status.Kind == DictationStatusKind.Listening)
         {
-            StartLiveActivity(status);
+            StartLiveActivity(status, mode);
             return;
         }
 
@@ -239,12 +250,13 @@ internal sealed class StatusOverlayForm : Form
         _hideTimer.Start();
     }
 
-    private void StartLiveActivity(DictationStatus status)
+    private void StartLiveActivity(DictationStatus status, ListeningTriggerMode mode)
     {
         UseOverlaySize(ListeningOverlaySize);
         _accent.BackColor = AccentFor(status.Kind);
         _title.Text = status.Title;
         _listeningStartedAt = DateTimeOffset.UtcNow;
+        _listeningTriggerMode = mode;
         _activityMeterRequestedVisible = true;
         _activityMeter.Visible = true;
         _activityMeter.Reset();
@@ -262,7 +274,7 @@ internal sealed class StatusOverlayForm : Form
 
     private void UpdateLiveActivity()
     {
-        _message.Text = ListeningStatusFormatter.Format(DateTimeOffset.UtcNow - _listeningStartedAt);
+        _message.Text = ListeningStatusFormatter.Format(DateTimeOffset.UtcNow - _listeningStartedAt, _listeningTriggerMode);
         _activityMeter.Decay();
     }
 

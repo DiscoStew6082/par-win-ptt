@@ -95,6 +95,30 @@ public sealed class AppBehaviorTests
     }
 
     [TestMethod]
+    public void ListeningStatusFormatterShowsToggleHintWithoutRelease()
+    {
+        var text = ListeningStatusFormatter.Format(
+            TimeSpan.FromSeconds(9),
+            ListeningTriggerMode.Toggle);
+
+        Assert.AreEqual("Recording 00:09" + Environment.NewLine + "Press Right Shift to transcribe", text);
+        StringAssert.DoesNotMatch(text, new System.Text.RegularExpressions.Regex("Release"));
+    }
+
+    [TestMethod]
+    public void StatusOverlayShowsToggleListeningTextWithoutRelease()
+    {
+        RunOnStaThread(() =>
+        {
+            using var overlay = new StatusOverlayForm();
+
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Listening, ListeningTriggerMode.Toggle);
+
+            Assert.AreEqual("Recording 00:00" + Environment.NewLine + "Press Right Shift to transcribe", overlay.MessageTextForTest);
+        });
+    }
+
+    [TestMethod]
     public void AudioLevelCalculatorConvertsPcmSamplesToNormalizedPeak()
     {
         var pcm = new byte[6];

@@ -21,6 +21,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private AppSettings _settings = AppSettings.Default;
     private bool _exiting;
     private bool _acceptedRecordingStart;
+    private bool _toggleRecordingActive;
     private bool _settingsOpening;
     private string? _lastTranscriptPreview;
 
@@ -61,6 +62,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _hotkeySource = new RightCtrlHotkeySource();
         _hotkeySource.Pressed += () => PostToUi(OnHotkeyPressedAsync);
         _hotkeySource.Released += () => PostToUi(OnHotkeyReleasedAsync);
+        _hotkeySource.ToggleRequested += () => PostToUi(OnToggleRequestedAsync);
         _hotkeySource.Start();
         _ = LoadSettingsAsync();
     }
@@ -206,7 +208,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             _acceptedRecordingStart = true;
             PlayStatusSound(StatusSound.Listening);
-            ShowStatus(DictationStatusCatalog.Listening, ToolTipIcon.Info);
+            ShowStatus(DictationStatusCatalog.Listening, ToolTipIcon.Info, mode: ListeningTriggerMode.PushToTalk);
         }
     }
 
@@ -223,6 +225,37 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         _acceptedRecordingStart = false;
+        await StopRecordingAndTranscribeAsync();
+    }
+
+    private async Task OnToggleRequestedAsync()
+    {
+        if (_exiting)
+        {
+            return;
+        }
+
+        if (_toggleRecordingActive)
+        {
+            _toggleRecordingActive = false;
+            await StopRecordingAndTranscribeAsync();
+            return;
+        }
+
+        if (await _dictationController.HandleHotkeyDownAsync(_lifetime.Token))
+        {
+            _toggleRecordingActive = true;
+            PlayStatusSound(StatusSound.Listening);
+            ShowStatus(
+                DictationStatusCatalog.Listening,
+                ToolTipIcon.Info,
+                notifyMessage: ListeningStatusFormatter.FormatHint(ListeningTriggerMode.Toggle),
+                mode: ListeningTriggerMode.Toggle);
+        }
+    }
+
+    private async Task StopRecordingAndTranscribeAsync()
+    {
         _lastTranscriptPreview = null;
         PlayStatusSound(StatusSound.Transcribing);
         ShowStatus(DictationStatusCatalog.Transcribing, ToolTipIcon.Info);
@@ -283,9 +316,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
         DictationStatus status,
         ToolTipIcon icon,
         bool notify = true,
-        string? notifyMessage = null)
+        string? notifyMessage = null,
+        ListeningTriggerMode mode = ListeningTriggerMode.PushToTalk)
     {
-        _statusOverlay.ShowStatus(status);
+        _statusOverlay.ShowStatus(status, mode);
         if (notify)
         {
             ShowTrayNotification(status.Title, notifyMessage ?? status.Message, icon);

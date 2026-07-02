@@ -11,12 +11,20 @@ internal sealed class RightCtrlHotkeySource : IDisposable
     private const int WmSysKeyDown = 0x0104;
     private const int WmSysKeyUp = 0x0105;
     private const int VkRightControl = 0xA3;
+    private const int VkRightShift = 0xA1;
 
     private readonly LowLevelKeyboardProc _callback;
     private IntPtr _hookId;
+    private bool _rightShiftPressed;
 
     public event Action? Pressed;
     public event Action? Released;
+    public event Action? ToggleRequested;
+
+    internal const int KeyDownMessageForTest = WmKeyDown;
+    internal const int KeyUpMessageForTest = WmKeyUp;
+    internal const int RightControlVirtualKeyForTest = VkRightControl;
+    internal const int RightShiftVirtualKeyForTest = VkRightShift;
 
     public RightCtrlHotkeySource()
     {
@@ -50,9 +58,20 @@ internal sealed class RightCtrlHotkeySource : IDisposable
 
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode >= 0 && Marshal.ReadInt32(lParam) == VkRightControl)
+        if (nCode >= 0)
         {
-            var message = wParam.ToInt32();
+            ProcessKeyEvent(Marshal.ReadInt32(lParam), wParam.ToInt32());
+        }
+
+        return CallNextHookEx(_hookId, nCode, wParam, lParam);
+    }
+
+    internal void ProcessKeyEventForTest(int virtualKey, int message) => ProcessKeyEvent(virtualKey, message);
+
+    private void ProcessKeyEvent(int virtualKey, int message)
+    {
+        if (virtualKey == VkRightControl)
+        {
             if (message is WmKeyDown or WmSysKeyDown)
             {
                 Pressed?.Invoke();
@@ -62,8 +81,21 @@ internal sealed class RightCtrlHotkeySource : IDisposable
                 Released?.Invoke();
             }
         }
-
-        return CallNextHookEx(_hookId, nCode, wParam, lParam);
+        else if (virtualKey == VkRightShift)
+        {
+            if (message is WmKeyDown or WmSysKeyDown)
+            {
+                if (!_rightShiftPressed)
+                {
+                    _rightShiftPressed = true;
+                    ToggleRequested?.Invoke();
+                }
+            }
+            else if (message is WmKeyUp or WmSysKeyUp)
+            {
+                _rightShiftPressed = false;
+            }
+        }
     }
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
