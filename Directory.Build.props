@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <Authors>discostew6082</Authors>
+    <Company>discostew6082</Company>
+    <Product>Parakeet PTT</Product>
+    <Description>Local Windows push-to-talk dictation tray app powered by parakeet.cpp.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/discostew6082/par-win-ptt</RepositoryUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+  </PropertyGroup>
+</Project>

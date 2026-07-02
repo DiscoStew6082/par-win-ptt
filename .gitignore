@@ -1,6 +1,8 @@
 bin/
 obj/
+.vs/
 *.user
+*.suo
 publish/
 TestResults/
 smoke/
