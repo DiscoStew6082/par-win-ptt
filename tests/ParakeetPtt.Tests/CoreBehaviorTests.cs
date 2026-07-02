@@ -96,9 +96,28 @@ public sealed class CoreBehaviorTests
         Assert.AreEqual("hello from cli", result.Text);
         Assert.AreEqual(0.88, result.Confidence);
         Assert.AreEqual("C:\\tools\\parakeet-cli.exe", runner.LastRequest?.FileName);
+        Assert.AreEqual("C:\\tools", runner.LastRequest?.WorkingDirectory);
         CollectionAssert.AreEqual(
             new[] { "transcribe", "--model", "C:\\models\\tdt_ctc-110m-f16.gguf", "--input", "C:\\temp\\speech.wav", "--json" },
             runner.LastRequest?.Arguments.ToArray());
+    }
+
+    [TestMethod]
+    public void RuntimePathBuilderIncludesSiblingCudaDllDirectories()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"parakeet-runtime-paths-{Guid.NewGuid():N}");
+        var cliDir = Path.Combine(root, "parakeet-v0.4.0-bin-win-cuda-x64");
+        var cudaDir = Path.Combine(root, "cudart-parakeet-bin-win-cuda-x64");
+        Directory.CreateDirectory(cliDir);
+        Directory.CreateDirectory(cudaDir);
+        var cliPath = Path.Combine(cliDir, "parakeet-cli.exe");
+        File.WriteAllText(cliPath, string.Empty);
+
+        var paths = RuntimePathBuilder.GetRuntimeSearchPaths(cliPath);
+
+        CollectionAssert.Contains(paths.ToArray(), cliDir);
+        CollectionAssert.Contains(paths.ToArray(), cudaDir);
+        Directory.Delete(root, recursive: true);
     }
 
     [TestMethod]

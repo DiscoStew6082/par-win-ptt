@@ -12,10 +12,13 @@ public sealed class ParakeetCliTranscriber(CliTranscriberOptions options, IProce
 {
     public async Task<TranscriptResult> TranscribeAsync(string wavPath, CancellationToken cancellationToken)
     {
+        var cliDirectory = Path.GetDirectoryName(options.CliPath);
         var request = new ProcessRequest(
             options.CliPath,
             ["transcribe", "--model", options.ModelPath, "--input", wavPath, "--json"],
-            options.Timeout ?? TimeSpan.FromMinutes(2));
+            options.Timeout ?? TimeSpan.FromMinutes(2),
+            cliDirectory,
+            RuntimePathBuilder.GetRuntimeSearchPaths(options.CliPath));
 
         var result = await processRunner.RunAsync(request, cancellationToken);
         if (result.ExitCode != 0)
@@ -64,7 +67,12 @@ public interface IProcessRunner
     Task<ProcessResult> RunAsync(ProcessRequest request, CancellationToken cancellationToken);
 }
 
-public sealed record ProcessRequest(string FileName, IReadOnlyList<string> Arguments, TimeSpan Timeout);
+public sealed record ProcessRequest(
+    string FileName,
+    IReadOnlyList<string> Arguments,
+    TimeSpan Timeout,
+    string? WorkingDirectory = null,
+    IReadOnlyList<string>? PathDirectories = null);
 
 public sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError, TimeSpan Elapsed);
 
@@ -82,8 +90,16 @@ public sealed class SystemProcessRunner : IProcessRunner
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            ErrorDialog = false
         };
+
+        if (!string.IsNullOrWhiteSpace(request.WorkingDirectory))
+        {
+            process.StartInfo.WorkingDirectory = request.WorkingDirectory;
+        }
+
+        ApplyPathDirectories(process.StartInfo, request.PathDirectories);
 
         foreach (var argument in request.Arguments)
         {
@@ -116,5 +132,45 @@ public sealed class SystemProcessRunner : IProcessRunner
 
             throw new TimeoutException($"parakeet-cli did not finish within {request.Timeout}.");
         }
+    }
+
+    private static void ApplyPathDirectories(ProcessStartInfo startInfo, IReadOnlyList<string>? pathDirectories)
+    {
+        if (pathDirectories is null || pathDirectories.Count == 0)
+        {
+            return;
+        }
+
+        var existingPath = startInfo.Environment.TryGetValue("PATH", out var path)
+            ? path
+            : Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        startInfo.Environment["PATH"] = string.Join(Path.PathSeparator, pathDirectories.Concat([existingPath]));
+    }
+}
+
+public static class RuntimePathBuilder
+{
+    public static IReadOnlyList<string> GetRuntimeSearchPaths(string executablePath)
+    {
+        var executableDirectory = Path.GetDirectoryName(executablePath);
+        if (string.IsNullOrWhiteSpace(executableDirectory))
+        {
+            return [];
+        }
+
+        var searchPaths = new List<string> { executableDirectory };
+        var runtimeRoot = Directory.GetParent(executableDirectory)?.FullName;
+        var driveRoot = runtimeRoot is null ? null : Path.GetPathRoot(runtimeRoot);
+        if (runtimeRoot is not null
+            && Directory.Exists(runtimeRoot)
+            && !string.Equals(driveRoot, runtimeRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            searchPaths.AddRange(Directory.EnumerateDirectories(runtimeRoot, "cudart-*", SearchOption.TopDirectoryOnly));
+        }
+
+        return searchPaths
+            .Where(Directory.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 }
