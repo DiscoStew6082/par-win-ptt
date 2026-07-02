@@ -66,7 +66,7 @@ public sealed class AppBehaviorTests
 
             Assert.AreEqual(560, StatusOverlayForm.ListeningSizeForTest.Width);
             Assert.AreEqual(StatusOverlayForm.ListeningSizeForTest, overlay.Size);
-            Assert.AreEqual(288, overlay.ActivityMeterHeightForTest);
+            Assert.AreEqual(194, overlay.ActivityMeterHeightForTest);
             Assert.IsTrue(overlay.TextPanelHeightForTest >= overlay.TitlePreferredHeightForTest + overlay.MessagePreferredHeightForTest + 20);
             Assert.IsTrue(overlay.ActivityMeterTopForTest >= overlay.TextPanelBottomForTest);
         });
@@ -258,7 +258,7 @@ public sealed class AppBehaviorTests
             new Rectangle(100, 50, 1200, 800),
             StatusOverlayForm.ListeningSizeForTest);
 
-        Assert.AreEqual(new Point(420, 410), location);
+        Assert.AreEqual(new Point(420, 504), location);
     }
 
     [TestMethod]

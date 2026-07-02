@@ -9,7 +9,7 @@ internal sealed class StatusOverlayForm : Form
     private const int WsExNoActivate = 0x08000000;
     private const int WsExToolWindow = 0x00000080;
     private static readonly Size CompactOverlaySize = new(560, 160);
-    private static readonly Size ListeningOverlaySize = new(560, 420);
+    private static readonly Size ListeningOverlaySize = new(560, 326);
 
     private readonly Panel _accent = new();
     private readonly Panel _textPanel = new();
@@ -63,7 +63,7 @@ internal sealed class StatusOverlayForm : Form
         _textPanel.Controls.Add(_title);
 
         _activityMeter.Dock = DockStyle.Bottom;
-        _activityMeter.Height = 288;
+        _activityMeter.Height = 194;
         _activityMeter.Visible = false;
 
         var content = new Panel
