@@ -6,7 +6,7 @@ internal sealed class StatusOverlayForm : Form
 {
     private const int WsExNoActivate = 0x08000000;
     private const int WsExToolWindow = 0x00000080;
-    private static readonly Size DefaultOverlaySize = new(560, 126);
+    private static readonly Size DefaultOverlaySize = new(560, 144);
 
     private readonly Panel _accent = new();
     private readonly Label _title = new();
@@ -33,24 +33,24 @@ internal sealed class StatusOverlayForm : Form
 
         _title.AutoSize = false;
         _title.Dock = DockStyle.Top;
-        _title.Height = 28;
+        _title.Height = 36;
         _title.Font = new Font("Segoe UI", 10.5F, FontStyle.Bold, GraphicsUnit.Point);
         _title.ForeColor = DarkTheme.Text;
         _title.BackColor = Color.Transparent;
-        _title.TextAlign = ContentAlignment.BottomLeft;
+        _title.TextAlign = ContentAlignment.MiddleLeft;
 
         _message.AutoSize = false;
         _message.Dock = DockStyle.Fill;
         _message.Font = DarkTheme.BodyFont;
         _message.ForeColor = DarkTheme.MutedText;
         _message.BackColor = Color.Transparent;
-        _message.TextAlign = ContentAlignment.TopLeft;
+        _message.TextAlign = ContentAlignment.MiddleLeft;
         _message.AutoEllipsis = true;
 
         var content = new Panel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(14, 8, 14, 10),
+            Padding = new Padding(16, 12, 16, 14),
             BackColor = DarkTheme.Surface
         };
         content.Controls.Add(_message);
@@ -81,6 +81,18 @@ internal sealed class StatusOverlayForm : Form
     internal string TitleTextForTest => _title.Text;
 
     internal string MessageTextForTest => _message.Text;
+
+    internal ContentAlignment TitleAlignmentForTest => _title.TextAlign;
+
+    internal ContentAlignment MessageAlignmentForTest => _message.TextAlign;
+
+    internal int TitleHeightForTest => _title.Height;
+
+    internal int MessageHeightForTest => _message.Height;
+
+    internal int TitlePreferredHeightForTest => _title.GetPreferredSize(new Size(_title.Width, 0)).Height;
+
+    internal int MessagePreferredHeightForTest => _message.GetPreferredSize(new Size(_message.Width, 0)).Height;
 
     protected override CreateParams CreateParams
     {

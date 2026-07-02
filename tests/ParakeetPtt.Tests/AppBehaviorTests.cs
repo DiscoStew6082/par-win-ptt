@@ -38,13 +38,29 @@ public sealed class AppBehaviorTests
     }
 
     [TestMethod]
+    public void StatusOverlayKeepsListeningTextAwayFromClippedEdges()
+    {
+        RunOnStaThread(() =>
+        {
+            using var overlay = new StatusOverlayForm();
+
+            overlay.ApplyStatusForTest(DictationStatusCatalog.Listening);
+
+            Assert.AreEqual(ContentAlignment.MiddleLeft, overlay.TitleAlignmentForTest);
+            Assert.AreEqual(ContentAlignment.MiddleLeft, overlay.MessageAlignmentForTest);
+            Assert.IsTrue(overlay.TitleHeightForTest >= overlay.TitlePreferredHeightForTest + 10);
+            Assert.IsTrue(overlay.MessageHeightForTest >= overlay.MessagePreferredHeightForTest + 10);
+        });
+    }
+
+    [TestMethod]
     public void StatusOverlayPositionsAtBottomCenterOfWorkingArea()
     {
         var location = StatusOverlayForm.CalculateBottomCenterLocationForTest(
             new Rectangle(100, 50, 1200, 800),
             StatusOverlayForm.DefaultSizeForTest);
 
-        Assert.AreEqual(new Point(420, 704), location);
+        Assert.AreEqual(new Point(420, 686), location);
     }
 
     [TestMethod]
@@ -54,7 +70,7 @@ public sealed class AppBehaviorTests
             new Rectangle(100, 50, 420, 800),
             StatusOverlayForm.DefaultSizeForTest);
 
-        Assert.AreEqual(new Point(120, 704), location);
+        Assert.AreEqual(new Point(120, 686), location);
     }
 
     private static void RunOnStaThread(Action action)
