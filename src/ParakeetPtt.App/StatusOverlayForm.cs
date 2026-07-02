@@ -363,7 +363,7 @@ internal sealed class StatusOverlayForm : Form
 
         private int[] CalculateBarHeights()
         {
-            var maxHeight = Math.Max(8, Height - 4);
+            var maxHeight = Math.Max(8, Height);
             var visualLevel = VisualLevel(_level);
             var heights = new int[BarCount];
 
@@ -379,7 +379,7 @@ internal sealed class StatusOverlayForm : Form
 
         private static double VisualLevel(double level)
         {
-            return Math.Pow(Math.Clamp(level, 0, 1), 0.35);
+            return Math.Pow(Math.Clamp(level, 0, 1), 0.18);
         }
 
         private static void FillRoundedRectangle(Graphics graphics, Brush brush, Rectangle bounds, int radius)
