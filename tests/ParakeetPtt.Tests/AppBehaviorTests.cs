@@ -48,6 +48,7 @@ public sealed class AppBehaviorTests
 
             Assert.AreEqual(ContentAlignment.MiddleLeft, overlay.TitleAlignmentForTest);
             Assert.AreEqual(ContentAlignment.MiddleLeft, overlay.MessageAlignmentForTest);
+            Assert.AreEqual("Recording 00:00" + Environment.NewLine + "Release to transcribe", overlay.MessageTextForTest);
             Assert.IsTrue(overlay.TitleHeightForTest >= overlay.TitlePreferredHeightForTest + 10);
             Assert.IsTrue(overlay.MessageHeightForTest >= overlay.MessagePreferredHeightForTest + 10);
         });
@@ -58,7 +59,7 @@ public sealed class AppBehaviorTests
     {
         var text = ListeningStatusFormatter.Format(TimeSpan.FromMinutes(61) + TimeSpan.FromSeconds(5));
 
-        Assert.AreEqual("Recording 61:05 - Release to transcribe", text);
+        Assert.AreEqual("Recording 61:05" + Environment.NewLine + "Release to transcribe", text);
     }
 
     [TestMethod]
@@ -191,7 +192,7 @@ public sealed class AppBehaviorTests
             new Rectangle(100, 50, 1200, 800),
             StatusOverlayForm.DefaultSizeForTest);
 
-        Assert.AreEqual(new Point(420, 686), location);
+        Assert.AreEqual(new Point(420, 670), location);
     }
 
     [TestMethod]
@@ -201,7 +202,7 @@ public sealed class AppBehaviorTests
             new Rectangle(100, 50, 420, 800),
             StatusOverlayForm.DefaultSizeForTest);
 
-        Assert.AreEqual(new Point(120, 686), location);
+        Assert.AreEqual(new Point(120, 670), location);
     }
 
     private static void RunOnStaThread(Action action)

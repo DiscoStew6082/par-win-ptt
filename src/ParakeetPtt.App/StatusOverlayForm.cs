@@ -7,7 +7,7 @@ internal sealed class StatusOverlayForm : Form
 {
     private const int WsExNoActivate = 0x08000000;
     private const int WsExToolWindow = 0x00000080;
-    private static readonly Size DefaultOverlaySize = new(560, 144);
+    private static readonly Size DefaultOverlaySize = new(560, 160);
 
     private readonly Panel _accent = new();
     private readonly Label _title = new();
