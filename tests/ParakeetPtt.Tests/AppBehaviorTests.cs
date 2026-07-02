@@ -58,7 +58,7 @@ public sealed class AppBehaviorTests
     {
         var text = ListeningStatusFormatter.Format(TimeSpan.FromMinutes(61) + TimeSpan.FromSeconds(5));
 
-        Assert.AreEqual("Recording 61:05 - release Right Ctrl to transcribe.", text);
+        Assert.AreEqual("Recording 61:05 - Release to transcribe", text);
     }
 
     [TestMethod]

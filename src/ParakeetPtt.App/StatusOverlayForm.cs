@@ -53,7 +53,7 @@ internal sealed class StatusOverlayForm : Form
         _message.AutoEllipsis = true;
 
         _activityMeter.Dock = DockStyle.Bottom;
-        _activityMeter.Height = 24;
+        _activityMeter.Height = 36;
         _activityMeter.Visible = false;
 
         var content = new Panel
@@ -336,14 +336,14 @@ internal sealed class StatusOverlayForm : Form
 
         private int[] CalculateBarHeights()
         {
-            var maxHeight = Math.Max(8, Height - 6);
+            var maxHeight = Math.Max(8, Height - 4);
             var visualLevel = VisualLevel(_level);
             var heights = new int[BarCount];
 
             for (var i = 0; i < heights.Length; i++)
             {
                 var centerWeight = Math.Sin(Math.PI * (i + 0.5) / heights.Length);
-                var gain = 0.25 + centerWeight * 0.75;
+                var gain = 0.14 + Math.Pow(centerWeight, 1.7) * 0.86;
                 heights[i] = Math.Max(MinimumBarHeight, (int)Math.Round(MinimumBarHeight + visualLevel * gain * (maxHeight - MinimumBarHeight)));
             }
 
@@ -352,7 +352,7 @@ internal sealed class StatusOverlayForm : Form
 
         private static double VisualLevel(double level)
         {
-            return Math.Sqrt(Math.Clamp(level, 0, 1));
+            return Math.Pow(Math.Clamp(level, 0, 1), 0.35);
         }
 
         private static void FillRoundedRectangle(Graphics graphics, Brush brush, Rectangle bounds, int radius)
