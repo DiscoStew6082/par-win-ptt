@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace ParakeetPtt.App;
 
 internal static class DarkTheme
@@ -20,6 +22,7 @@ internal static class DarkTheme
         form.ForeColor = Text;
         form.Font = BodyFont;
         form.StartPosition = FormStartPosition.CenterScreen;
+        ApplyWindowChrome(form);
     }
 
     public static void Apply(Control control)
@@ -73,4 +76,54 @@ internal static class DarkTheme
             Margin = new Padding(0, 0, 0, 8)
         };
     }
+
+    private static void ApplyWindowChrome(Form form)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        if (form.IsHandleCreated)
+        {
+            DarkWindowChrome.Apply(form.Handle);
+            return;
+        }
+
+        form.HandleCreated += (_, _) => DarkWindowChrome.Apply(form.Handle);
+    }
+}
+
+internal static class DarkWindowChrome
+{
+    private const int Succeeded = 0;
+    private const int DwmwaUseImmersiveDarkMode = 20;
+    private const int DwmwaUseImmersiveDarkModeBefore20H1 = 19;
+    private const int DwmwaBorderColor = 34;
+    private const int DwmwaCaptionColor = 35;
+    private const int DwmwaTextColor = 36;
+
+    public static void Apply(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var enabled = 1;
+        if (DwmSetWindowAttribute(handle, DwmwaUseImmersiveDarkMode, ref enabled, sizeof(int)) != Succeeded)
+        {
+            DwmSetWindowAttribute(handle, DwmwaUseImmersiveDarkModeBefore20H1, ref enabled, sizeof(int));
+        }
+
+        var caption = ColorTranslator.ToWin32(DarkTheme.Background);
+        var border = ColorTranslator.ToWin32(DarkTheme.Border);
+        var text = ColorTranslator.ToWin32(DarkTheme.Text);
+        DwmSetWindowAttribute(handle, DwmwaCaptionColor, ref caption, sizeof(int));
+        DwmSetWindowAttribute(handle, DwmwaBorderColor, ref border, sizeof(int));
+        DwmSetWindowAttribute(handle, DwmwaTextColor, ref text, sizeof(int));
+    }
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
 }
