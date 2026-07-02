@@ -8,6 +8,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ModelRegistry _modelRegistry = ModelRegistry.CreateDefault();
     private readonly SessionHistory _history = new();
     private readonly AppSettingsStore _settingsStore = new(AppPaths.SettingsPath);
+    private readonly WaveInAudioRecorder _recorder;
     private readonly DictationController _dictationController;
     private readonly NotifyIcon _notifyIcon;
     private readonly RightCtrlHotkeySource _hotkeySource;
@@ -23,8 +24,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
     public TrayApplicationContext()
     {
         _uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+        _recorder = new WaveInAudioRecorder(AppPaths.RootDirectory);
         _dictationController = new DictationController(
-            new WaveInAudioRecorder(AppPaths.RootDirectory),
+            _recorder,
             new LazyAssetTranscriber(
                 AppPaths.RootDirectory,
                 _settingsStore,
@@ -298,6 +300,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _notifyIcon.Dispose();
         _settingsForm?.Dispose();
         _historyForm?.Dispose();
+        _ = Task.Run(_recorder.Dispose);
         _lifetime.Dispose();
         ExitThread();
     }

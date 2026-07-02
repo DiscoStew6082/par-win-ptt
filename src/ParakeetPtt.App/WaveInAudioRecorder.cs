@@ -8,11 +8,12 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
     private const int WaveMapper = -1;
     private const int WaveFormatPcm = 1;
     private const int CallbackFunction = 0x00030000;
-    private const int WomData = 0x3C0;
+    private const int WimData = 0x3C0;
     private const int BufferCount = 4;
     private const int BufferSize = 4096;
 
     private readonly object _gate = new();
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly WaveInProc _callback;
     private readonly List<WaveBuffer> _buffers = [];
     private readonly string _appData;
@@ -20,6 +21,9 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
     private IntPtr _handle;
     private DateTimeOffset _startedAt;
     private bool _recording;
+    private bool _stopping;
+    private bool _disposed;
+    private bool _disposeRequested;
 
     public WaveInAudioRecorder()
         : this(Path.GetTempPath())
@@ -32,95 +36,257 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
         _callback = OnWaveData;
     }
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
-        lock (_gate)
+        await _lifecycle.WaitAsync(cancellationToken);
+        try
         {
-            if (_recording)
-            {
-                return Task.CompletedTask;
-            }
-
-            Directory.CreateDirectory(_appData);
-            _pcm = new MemoryStream();
-            _startedAt = DateTimeOffset.UtcNow;
-            var format = WaveFormat.CreatePcm16KhzMono();
-            ThrowIfWaveError(waveInOpen(out _handle, WaveMapper, ref format, _callback, IntPtr.Zero, CallbackFunction), "waveInOpen");
-
-            for (var i = 0; i < BufferCount; i++)
-            {
-                var buffer = new WaveBuffer(_handle, BufferSize);
-                _buffers.Add(buffer);
-                ThrowIfWaveError(waveInAddBuffer(_handle, buffer.HeaderPointer, Marshal.SizeOf<WaveHdr>()), "waveInAddBuffer");
-            }
-
-            _recording = true;
-            ThrowIfWaveError(waveInStart(_handle), "waveInStart");
-            return Task.CompletedTask;
+            ThrowIfDisposed();
+            await Task.Run(StartCore, cancellationToken);
+        }
+        finally
+        {
+            _lifecycle.Release();
         }
     }
 
-    public Task<RecordedAudio> StopAsync(CancellationToken cancellationToken)
+    private void StartCore()
     {
-        MemoryStream pcm;
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            if (_recording || _handle != IntPtr.Zero)
+            {
+                return;
+            }
+        }
+
+        Directory.CreateDirectory(_appData);
+        var format = WaveFormat.CreatePcm16KhzMono();
+        ThrowIfWaveError(waveInOpen(out var handle, WaveMapper, ref format, _callback, IntPtr.Zero, CallbackFunction), "waveInOpen");
+        var buffers = new List<WaveBuffer>();
+
+        try
+        {
+            for (var i = 0; i < BufferCount; i++)
+            {
+                var buffer = new WaveBuffer(handle, BufferSize);
+                buffers.Add(buffer);
+                ThrowIfWaveError(waveInAddBuffer(handle, buffer.HeaderPointer, Marshal.SizeOf<WaveHdr>()), "waveInAddBuffer");
+            }
+
+            var shouldAbortStart = false;
+            lock (_gate)
+            {
+                if (_disposed || _disposeRequested)
+                {
+                    shouldAbortStart = true;
+                }
+                else
+                {
+                    _pcm = new MemoryStream();
+                    _startedAt = DateTimeOffset.UtcNow;
+                    _handle = handle;
+                    _buffers.AddRange(buffers);
+                    _recording = true;
+                    _stopping = false;
+                }
+            }
+
+            if (shouldAbortStart)
+            {
+                CleanupNative(handle, buffers);
+                lock (_gate)
+                {
+                    _disposed = true;
+                }
+
+                return;
+            }
+
+            ThrowIfWaveError(waveInStart(handle), "waveInStart");
+            CleanupStartedDeviceIfDisposeWasRequested(handle);
+        }
+        catch
+        {
+            lock (_gate)
+            {
+                _recording = false;
+                _stopping = true;
+                _handle = IntPtr.Zero;
+                _buffers.Clear();
+                _pcm?.Dispose();
+                _pcm = null;
+            }
+
+            waveInReset(handle);
+            foreach (var buffer in buffers)
+            {
+                buffer.Dispose();
+            }
+
+            waveInClose(handle);
+            throw;
+        }
+    }
+
+    public async Task<RecordedAudio> StopAsync(CancellationToken cancellationToken)
+    {
+        await _lifecycle.WaitAsync(cancellationToken);
+        try
+        {
+            ThrowIfDisposed();
+            return await Task.Run(StopCore, cancellationToken);
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    private RecordedAudio StopCore()
+    {
+        MemoryStream? pcm;
         TimeSpan duration;
+        IntPtr handle;
+        List<WaveBuffer> buffers;
 
         lock (_gate)
         {
+            ThrowIfDisposed();
             if (!_recording || _pcm is null)
             {
                 throw new InvalidOperationException("Recorder is not running.");
             }
 
             _recording = false;
-            waveInStop(_handle);
-            waveInReset(_handle);
+            _stopping = true;
+            handle = _handle;
             duration = DateTimeOffset.UtcNow - _startedAt;
-            pcm = _pcm;
-            _pcm = null;
-
-            foreach (var buffer in _buffers)
-            {
-                buffer.Dispose();
-            }
-
-            _buffers.Clear();
-            waveInClose(_handle);
-            _handle = IntPtr.Zero;
         }
 
+        waveInStop(handle);
+        waveInReset(handle);
+
+        lock (_gate)
+        {
+            pcm = _pcm;
+            _pcm = null;
+            buffers = [.. _buffers];
+            _buffers.Clear();
+            _handle = IntPtr.Zero;
+            _stopping = false;
+        }
+
+        foreach (var buffer in buffers)
+        {
+            buffer.Dispose();
+        }
+
+        waveInClose(handle);
+
         var wavPath = Path.Combine(_appData, $"utterance-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fff}.wav");
-        WriteWav(wavPath, pcm.ToArray());
-        pcm.Dispose();
-        return Task.FromResult(new RecordedAudio(wavPath, duration, DeleteAfterUse: true));
+        WriteWav(wavPath, pcm?.ToArray() ?? []);
+        pcm?.Dispose();
+        return new RecordedAudio(wavPath, duration, DeleteAfterUse: true);
     }
 
     public void Dispose()
     {
+        _lifecycle.Wait();
+        try
+        {
+            DisposeCore();
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    private void DisposeCore()
+    {
+        IntPtr handle;
+        List<WaveBuffer> buffers;
+        MemoryStream? pcm;
+
         lock (_gate)
         {
-            _recording = false;
-            if (_handle != IntPtr.Zero)
+            if (_disposed)
             {
-                waveInReset(_handle);
-                foreach (var buffer in _buffers)
-                {
-                    buffer.Dispose();
-                }
-
-                _buffers.Clear();
-                waveInClose(_handle);
-                _handle = IntPtr.Zero;
+                return;
             }
 
-            _pcm?.Dispose();
+            _disposeRequested = true;
+            _disposed = true;
+            _recording = false;
+            _stopping = true;
+            handle = _handle;
+            buffers = [.. _buffers];
+            _buffers.Clear();
+            _handle = IntPtr.Zero;
+            pcm = _pcm;
             _pcm = null;
         }
+
+        CleanupNative(handle, buffers);
+
+        pcm?.Dispose();
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_disposed || _disposeRequested)
+        {
+            throw new ObjectDisposedException(nameof(WaveInAudioRecorder));
+        }
+    }
+
+    private void CleanupStartedDeviceIfDisposeWasRequested(IntPtr handle)
+    {
+        List<WaveBuffer>? buffers = null;
+        MemoryStream? pcm = null;
+
+        lock (_gate)
+        {
+            if (!_disposeRequested && !_disposed)
+            {
+                return;
+            }
+
+            _recording = false;
+            _stopping = true;
+            _handle = IntPtr.Zero;
+            buffers = [.. _buffers];
+            _buffers.Clear();
+            pcm = _pcm;
+            _pcm = null;
+            _disposed = true;
+        }
+
+        CleanupNative(handle, buffers);
+        pcm?.Dispose();
+    }
+
+    private static void CleanupNative(IntPtr handle, IEnumerable<WaveBuffer> buffers)
+    {
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        waveInReset(handle);
+        foreach (var buffer in buffers)
+        {
+            buffer.Dispose();
+        }
+
+        waveInClose(handle);
     }
 
     private void OnWaveData(IntPtr hwi, int uMsg, IntPtr dwInstance, IntPtr dwParam1, IntPtr dwParam2)
     {
-        if (uMsg != WomData)
+        if (uMsg != WimData)
         {
             return;
         }
@@ -140,7 +306,7 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
                 _pcm.Write(data, 0, data.Length);
             }
 
-            if (_recording)
+            if (_recording && !_stopping)
             {
                 waveInAddBuffer(hwi, dwParam1, Marshal.SizeOf<WaveHdr>());
             }
@@ -179,6 +345,8 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
     {
         private readonly IntPtr _handle;
         private readonly IntPtr _dataPointer;
+        private readonly bool _prepared;
+        private bool _disposed;
         public IntPtr HeaderPointer { get; }
 
         public WaveBuffer(IntPtr handle, int size)
@@ -191,15 +359,33 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
                 Data = _dataPointer,
                 BufferLength = size
             };
-            Marshal.StructureToPtr(header, HeaderPointer, false);
-            ThrowIfWaveError(waveInPrepareHeader(_handle, HeaderPointer, Marshal.SizeOf<WaveHdr>()), "waveInPrepareHeader");
+            try
+            {
+                Marshal.StructureToPtr(header, HeaderPointer, false);
+                ThrowIfWaveError(waveInPrepareHeader(_handle, HeaderPointer, Marshal.SizeOf<WaveHdr>()), "waveInPrepareHeader");
+                _prepared = true;
+            }
+            catch
+            {
+                Marshal.FreeHGlobal(HeaderPointer);
+                Marshal.FreeHGlobal(_dataPointer);
+                throw;
+            }
         }
 
         public void Dispose()
         {
-            waveInUnprepareHeader(_handle, HeaderPointer, Marshal.SizeOf<WaveHdr>());
-            Marshal.FreeHGlobal(HeaderPointer);
-            Marshal.FreeHGlobal(_dataPointer);
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (!_prepared || waveInUnprepareHeader(_handle, HeaderPointer, Marshal.SizeOf<WaveHdr>()) == 0)
+            {
+                Marshal.FreeHGlobal(HeaderPointer);
+                Marshal.FreeHGlobal(_dataPointer);
+                _disposed = true;
+            }
         }
     }
 
