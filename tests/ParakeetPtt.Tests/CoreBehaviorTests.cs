@@ -14,9 +14,11 @@ public sealed class CoreBehaviorTests
         var paster = new FakeClipboardPaster();
         var controller = new DictationController(recorder, transcriber, paster, new SessionHistory());
 
-        await controller.HandleHotkeyDownAsync(CancellationToken.None);
-        await controller.HandleHotkeyUpAsync(CancellationToken.None);
+        var started = await controller.HandleHotkeyDownAsync(CancellationToken.None);
+        var outcome = await controller.HandleHotkeyUpAsync(CancellationToken.None);
 
+        Assert.IsTrue(started);
+        Assert.AreEqual(DictationOutcome.Pasted, outcome);
         Assert.AreEqual(1, recorder.StartCount);
         Assert.AreEqual(1, recorder.StopCount);
         Assert.AreEqual("utterance.wav", transcriber.LastAudioPath);
@@ -33,10 +35,13 @@ public sealed class CoreBehaviorTests
             new FakeClipboardPaster(),
             new SessionHistory());
 
-        await controller.HandleHotkeyDownAsync(CancellationToken.None);
-        await controller.HandleHotkeyDownAsync(CancellationToken.None);
-        await controller.HandleHotkeyUpAsync(CancellationToken.None);
+        var firstStarted = await controller.HandleHotkeyDownAsync(CancellationToken.None);
+        var duplicateStarted = await controller.HandleHotkeyDownAsync(CancellationToken.None);
+        var outcome = await controller.HandleHotkeyUpAsync(CancellationToken.None);
 
+        Assert.IsTrue(firstStarted);
+        Assert.IsFalse(duplicateStarted);
+        Assert.AreEqual(DictationOutcome.Pasted, outcome);
         Assert.AreEqual(1, recorder.StartCount);
         Assert.AreEqual(1, recorder.StopCount);
     }
@@ -53,8 +58,9 @@ public sealed class CoreBehaviorTests
             history);
 
         await controller.HandleHotkeyDownAsync(CancellationToken.None);
-        await controller.HandleHotkeyUpAsync(CancellationToken.None);
+        var outcome = await controller.HandleHotkeyUpAsync(CancellationToken.None);
 
+        Assert.AreEqual(DictationOutcome.EmptyTranscript, outcome);
         Assert.IsNull(paster.PastedText);
         Assert.AreEqual(0, history.Items.Count);
     }
@@ -71,8 +77,9 @@ public sealed class CoreBehaviorTests
             new SessionHistory());
 
         await controller.HandleHotkeyDownAsync(CancellationToken.None);
-        await controller.HandleHotkeyUpAsync(CancellationToken.None);
+        var outcome = await controller.HandleHotkeyUpAsync(CancellationToken.None);
 
+        Assert.AreEqual(DictationOutcome.Pasted, outcome);
         Assert.IsFalse(File.Exists(tempPath));
     }
 
@@ -103,7 +110,8 @@ public sealed class CoreBehaviorTests
         {
             SelectedModelId = "tdt-0.6b-v3-f16",
             DevicePreference = DevicePreference.Cpu,
-            NotificationsEnabled = false
+            NotificationsEnabled = false,
+            AudibleStatusEnabled = false
         };
 
         await store.SaveAsync(saved, CancellationToken.None);
@@ -112,6 +120,7 @@ public sealed class CoreBehaviorTests
         Assert.AreEqual(saved.SelectedModelId, loaded.SelectedModelId);
         Assert.AreEqual(DevicePreference.Cpu, loaded.DevicePreference);
         Assert.IsFalse(loaded.NotificationsEnabled);
+        Assert.IsFalse(loaded.AudibleStatusEnabled);
         File.Delete(path);
     }
 

@@ -12,6 +12,7 @@ internal sealed class SettingsForm : Form
     private readonly TextBox _modelPath = new();
     private readonly ComboBox _device = new();
     private readonly CheckBox _notifications = new();
+    private readonly CheckBox _sounds = new();
     private AppSettings _settings = AppSettings.Default;
 
     public event EventHandler<AppSettings>? SettingsSaved;
@@ -22,8 +23,8 @@ internal sealed class SettingsForm : Form
         _modelRegistry = modelRegistry;
 
         Text = "Parakeet PTT - Settings";
-        MinimumSize = new Size(560, 520);
-        Size = new Size(640, 560);
+        MinimumSize = new Size(720, 680);
+        Size = new Size(760, 720);
 
         DarkTheme.Apply(this);
         BuildLayout();
@@ -43,7 +44,8 @@ internal sealed class SettingsForm : Form
             ColumnCount = 1,
             RowCount = 3,
             Padding = new Padding(20),
-            BackColor = DarkTheme.Background
+            BackColor = DarkTheme.Background,
+            AutoScroll = true
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -56,7 +58,18 @@ internal sealed class SettingsForm : Form
             Font = DarkTheme.HeaderFont,
             ForeColor = DarkTheme.Text,
             BackColor = Color.Transparent,
-            Margin = new Padding(0, 0, 0, 14)
+            Margin = new Padding(0, 0, 0, 6)
+        };
+
+        var summary = new Label
+        {
+            Text = "Hold Right Ctrl to record. Runtime and model paths may stay blank; Parakeet PTT will download them on first dictation.",
+            AutoSize = false,
+            Height = 44,
+            Dock = DockStyle.Top,
+            ForeColor = DarkTheme.MutedText,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0, 0, 0, 16)
         };
 
         var fields = new TableLayoutPanel
@@ -77,10 +90,10 @@ internal sealed class SettingsForm : Form
         _model.DataSource = _modelRegistry.Models.ToList();
 
         _runtimePath.Dock = DockStyle.Fill;
-        _runtimePath.PlaceholderText = "Path to parakeet runtime";
+        _runtimePath.PlaceholderText = "Auto-download on first dictation";
 
         _modelPath.Dock = DockStyle.Fill;
-        _modelPath.PlaceholderText = "Path to downloaded model";
+        _modelPath.PlaceholderText = "Auto-download on first dictation";
 
         _device.Dock = DockStyle.Top;
         _device.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -91,13 +104,19 @@ internal sealed class SettingsForm : Form
         _notifications.BackColor = Color.Transparent;
         _notifications.ForeColor = DarkTheme.Text;
         _notifications.Margin = new Padding(0, 12, 0, 8);
+        _sounds.Text = "Play sounds when recording starts, transcription begins, and paste completes";
+        _sounds.AutoSize = true;
+        _sounds.BackColor = Color.Transparent;
+        _sounds.ForeColor = DarkTheme.Text;
+        _sounds.Margin = new Padding(0, 4, 0, 8);
 
         AddField(fields, "Push-to-talk hotkey", _hotkey);
         AddField(fields, "Model", _model);
-        AddPathField(fields, "Runtime path", _runtimePath);
-        AddPathField(fields, "Model path", _modelPath);
+        AddPathField(fields, "Runtime path (optional)", _runtimePath, "Blank uses %LOCALAPPDATA%\\ParakeetPtt\\runtimes and downloads the selected runtime automatically.");
+        AddPathField(fields, "Model path (optional)", _modelPath, "Blank uses %LOCALAPPDATA%\\ParakeetPtt\\models and downloads the selected model automatically.");
         AddField(fields, "Device preference", _device);
         fields.Controls.Add(_notifications);
+        fields.Controls.Add(_sounds);
 
         var buttons = new FlowLayoutPanel
         {
@@ -119,7 +138,17 @@ internal sealed class SettingsForm : Form
         buttons.Controls.Add(save);
         buttons.Controls.Add(cancel);
 
-        root.Controls.Add(title, 0, 0);
+        var header = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 1,
+            AutoSize = true,
+            BackColor = DarkTheme.Background
+        };
+        header.Controls.Add(title);
+        header.Controls.Add(summary);
+
+        root.Controls.Add(header, 0, 0);
         root.Controls.Add(fields, 0, 1);
         root.Controls.Add(buttons, 0, 2);
         Controls.Add(root);
@@ -134,7 +163,7 @@ internal sealed class SettingsForm : Form
         fields.Controls.Add(control);
     }
 
-    private static void AddPathField(TableLayoutPanel fields, string labelText, TextBox textBox)
+    private static void AddPathField(TableLayoutPanel fields, string labelText, TextBox textBox, string helpText)
     {
         fields.Controls.Add(DarkTheme.Label(labelText));
 
@@ -170,6 +199,7 @@ internal sealed class SettingsForm : Form
         row.Controls.Add(textBox, 0, 0);
         row.Controls.Add(browse, 1, 0);
         fields.Controls.Add(row);
+        fields.Controls.Add(DarkTheme.HelpText(helpText));
     }
 
     private void ApplySettings(AppSettings settings)
@@ -179,6 +209,7 @@ internal sealed class SettingsForm : Form
         _modelPath.Text = settings.ModelPath ?? string.Empty;
         _device.SelectedItem = settings.DevicePreference;
         _notifications.Checked = settings.NotificationsEnabled;
+        _sounds.Checked = settings.AudibleStatusEnabled;
 
         var selected = _modelRegistry.Find(settings.SelectedModelId) ?? _modelRegistry.DefaultModel;
         _model.SelectedValue = selected.Id;
@@ -194,7 +225,8 @@ internal sealed class SettingsForm : Form
             RuntimePath = EmptyToNull(_runtimePath.Text),
             ModelPath = EmptyToNull(_modelPath.Text),
             DevicePreference = _device.SelectedItem is DevicePreference preference ? preference : DevicePreference.Cuda,
-            NotificationsEnabled = _notifications.Checked
+            NotificationsEnabled = _notifications.Checked,
+            AudibleStatusEnabled = _sounds.Checked
         };
 
         await _settingsStore.SaveAsync(_settings, CancellationToken.None);

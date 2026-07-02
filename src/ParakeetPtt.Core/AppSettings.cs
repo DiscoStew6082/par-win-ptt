@@ -11,6 +11,7 @@ public sealed record AppSettings
     public string? ModelPath { get; init; }
     public DevicePreference DevicePreference { get; init; } = DevicePreference.Cuda;
     public bool NotificationsEnabled { get; init; } = true;
+    public bool AudibleStatusEnabled { get; init; } = true;
 
     public static AppSettings Default { get; } = new();
 }

@@ -9,22 +9,23 @@ public sealed class DictationController(
     private bool _isRecording;
     private bool _isProcessing;
 
-    public async Task HandleHotkeyDownAsync(CancellationToken cancellationToken)
+    public async Task<bool> HandleHotkeyDownAsync(CancellationToken cancellationToken)
     {
         if (_isRecording || _isProcessing)
         {
-            return;
+            return false;
         }
 
         _isRecording = true;
         await recorder.StartAsync(cancellationToken);
+        return true;
     }
 
-    public async Task HandleHotkeyUpAsync(CancellationToken cancellationToken)
+    public async Task<DictationOutcome> HandleHotkeyUpAsync(CancellationToken cancellationToken)
     {
         if (!_isRecording || _isProcessing)
         {
-            return;
+            return DictationOutcome.NotRecording;
         }
 
         _isRecording = false;
@@ -38,11 +39,12 @@ public sealed class DictationController(
             var cleaned = TranscriptNormalizer.Normalize(result.Text);
             if (cleaned.Length == 0)
             {
-                return;
+                return DictationOutcome.EmptyTranscript;
             }
 
             history.Add(cleaned);
             await clipboardPaster.PasteAsync(cleaned, cancellationToken);
+            return DictationOutcome.Pasted;
         }
         finally
         {
@@ -71,4 +73,11 @@ public sealed class DictationController(
         {
         }
     }
+}
+
+public enum DictationOutcome
+{
+    NotRecording,
+    EmptyTranscript,
+    Pasted
 }

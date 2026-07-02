@@ -59,4 +59,18 @@ internal static class DarkTheme
             Margin = new Padding(0, 6, 0, 3)
         };
     }
+
+    public static Label HelpText(string text)
+    {
+        return new Label
+        {
+            Text = text,
+            AutoSize = false,
+            Height = 38,
+            Dock = DockStyle.Top,
+            ForeColor = MutedText,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0, 0, 0, 8)
+        };
+    }
 }
