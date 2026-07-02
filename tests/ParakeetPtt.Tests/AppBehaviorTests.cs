@@ -36,6 +36,26 @@ public sealed class AppBehaviorTests
         });
     }
 
+    [TestMethod]
+    public void StatusOverlayPositionsAtBottomCenterOfWorkingArea()
+    {
+        var location = StatusOverlayForm.CalculateBottomCenterLocationForTest(
+            new Rectangle(100, 50, 1200, 800),
+            StatusOverlayForm.DefaultSizeForTest);
+
+        Assert.AreEqual(new Point(420, 704), location);
+    }
+
+    [TestMethod]
+    public void StatusOverlayPositionStaysInsideNarrowWorkingArea()
+    {
+        var location = StatusOverlayForm.CalculateBottomCenterLocationForTest(
+            new Rectangle(100, 50, 420, 800),
+            StatusOverlayForm.DefaultSizeForTest);
+
+        Assert.AreEqual(new Point(120, 704), location);
+    }
+
     private static void RunOnStaThread(Action action)
     {
         Exception? exception = null;

@@ -26,6 +26,45 @@ public sealed class CoreBehaviorTests
     }
 
     [TestMethod]
+    public async Task ReleasePublishesCleanedTranscriptPreviewBeforePaste()
+    {
+        string? preview = null;
+        string? previewAtPaste = null;
+        var paster = new FakeClipboardPaster(() => previewAtPaste = preview);
+        var controller = new DictationController(
+            new FakeAudioRecorder("utterance.wav"),
+            new FakeTranscriber("  preview this  "),
+            paster,
+            new SessionHistory(),
+            text => preview = text);
+
+        await controller.HandleHotkeyDownAsync(CancellationToken.None);
+        var outcome = await controller.HandleHotkeyUpAsync(CancellationToken.None);
+
+        Assert.AreEqual(DictationOutcome.Pasted, outcome);
+        Assert.AreEqual("Preview this.", preview);
+        Assert.AreEqual("Preview this.", previewAtPaste);
+    }
+
+    [TestMethod]
+    public async Task PreviewFailureDoesNotBlockPaste()
+    {
+        var paster = new FakeClipboardPaster();
+        var controller = new DictationController(
+            new FakeAudioRecorder("utterance.wav"),
+            new FakeTranscriber("still paste this"),
+            paster,
+            new SessionHistory(),
+            _ => throw new InvalidOperationException("preview failed"));
+
+        await controller.HandleHotkeyDownAsync(CancellationToken.None);
+        var outcome = await controller.HandleHotkeyUpAsync(CancellationToken.None);
+
+        Assert.AreEqual(DictationOutcome.Pasted, outcome);
+        Assert.AreEqual("Still paste this.", paster.PastedText);
+    }
+
+    [TestMethod]
     public async Task DuplicateKeydownDoesNotStartSecondRecording()
     {
         var recorder = new FakeAudioRecorder("utterance.wav");
@@ -206,6 +245,17 @@ public sealed class CoreBehaviorTests
     }
 
     [TestMethod]
+    public void DictationStatusCatalogProvidesTranscriptPreviewText()
+    {
+        var status = DictationStatusCatalog.TranscriptPreview("Preview this.");
+
+        Assert.AreEqual(DictationStatusKind.TranscriptPreview, status.Kind);
+        Assert.AreEqual("Transcript", status.Title);
+        Assert.AreEqual("Preview this.", status.Message);
+        Assert.IsFalse(status.AutoHide);
+    }
+
+    [TestMethod]
     public async Task AssetManagerDownloadsVerifiesExtractsRuntimeAndFindsCli()
     {
         var root = Path.Combine(Path.GetTempPath(), $"parakeet-assets-{Guid.NewGuid():N}");
@@ -268,12 +318,13 @@ internal sealed class FakeTranscriber(string transcript) : ITranscriber
     }
 }
 
-internal sealed class FakeClipboardPaster : IClipboardPaster
+internal sealed class FakeClipboardPaster(Action? beforePaste = null) : IClipboardPaster
 {
     public string? PastedText { get; private set; }
 
     public Task PasteAsync(string text, CancellationToken cancellationToken)
     {
+        beforePaste?.Invoke();
         PastedText = text;
         return Task.CompletedTask;
     }

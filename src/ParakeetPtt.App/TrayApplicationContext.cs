@@ -21,6 +21,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private bool _exiting;
     private bool _acceptedRecordingStart;
     private bool _settingsOpening;
+    private string? _lastTranscriptPreview;
 
     public TrayApplicationContext()
     {
@@ -35,7 +36,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 settings => _settings = settings,
                 message => ShowTrayNotification("Parakeet PTT", message, ToolTipIcon.Info)),
             new ClipboardPaster(),
-            _history);
+            _history,
+            ShowTranscriptPreview);
 
         _notifyIcon = new NotifyIcon
         {
@@ -218,6 +220,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         _acceptedRecordingStart = false;
+        _lastTranscriptPreview = null;
         PlayStatusSound(StatusSound.Transcribing);
         ShowStatus(DictationStatusCatalog.Transcribing, ToolTipIcon.Info);
         try
@@ -227,7 +230,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
             if (outcome == DictationOutcome.Pasted)
             {
                 PlayStatusSound(StatusSound.Done);
-                ShowStatus(DictationStatusCatalog.Pasted, ToolTipIcon.Info);
+                var status = _lastTranscriptPreview is { Length: > 0 }
+                    ? DictationStatusCatalog.PastedTranscript(_lastTranscriptPreview)
+                    : DictationStatusCatalog.Pasted;
+                ShowStatus(status, ToolTipIcon.Info, notifyMessage: DictationStatusCatalog.Pasted.Message);
             }
             else if (outcome == DictationOutcome.EmptyTranscript)
             {
@@ -264,10 +270,23 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _notifyIcon.ShowBalloonTip(2500);
     }
 
-    private void ShowStatus(DictationStatus status, ToolTipIcon icon)
+    private void ShowTranscriptPreview(string transcript)
+    {
+        _lastTranscriptPreview = transcript;
+        ShowStatus(DictationStatusCatalog.TranscriptPreview(transcript), ToolTipIcon.Info, notify: false);
+    }
+
+    private void ShowStatus(
+        DictationStatus status,
+        ToolTipIcon icon,
+        bool notify = true,
+        string? notifyMessage = null)
     {
         _statusOverlay.ShowStatus(status);
-        ShowTrayNotification(status.Title, status.Message, icon);
+        if (notify)
+        {
+            ShowTrayNotification(status.Title, notifyMessage ?? status.Message, icon);
+        }
     }
 
     private void PlayStatusSound(StatusSound sound)

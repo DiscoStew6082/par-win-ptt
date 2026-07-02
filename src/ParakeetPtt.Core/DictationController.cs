@@ -4,7 +4,8 @@ public sealed class DictationController(
     IAudioRecorder recorder,
     ITranscriber transcriber,
     IClipboardPaster clipboardPaster,
-    SessionHistory history)
+    SessionHistory history,
+    Action<string>? transcriptPreviewReady = null)
 {
     private bool _isRecording;
     private bool _isProcessing;
@@ -42,6 +43,7 @@ public sealed class DictationController(
                 return DictationOutcome.EmptyTranscript;
             }
 
+            TryPublishTranscriptPreview(cleaned);
             history.Add(cleaned);
             await clipboardPaster.PasteAsync(cleaned, cancellationToken);
             return DictationOutcome.Pasted;
@@ -70,6 +72,17 @@ public sealed class DictationController(
         {
         }
         catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private void TryPublishTranscriptPreview(string text)
+    {
+        try
+        {
+            transcriptPreviewReady?.Invoke(text);
+        }
+        catch (Exception)
         {
         }
     }

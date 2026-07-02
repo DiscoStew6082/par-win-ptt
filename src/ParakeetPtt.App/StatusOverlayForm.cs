@@ -6,6 +6,7 @@ internal sealed class StatusOverlayForm : Form
 {
     private const int WsExNoActivate = 0x08000000;
     private const int WsExToolWindow = 0x00000080;
+    private static readonly Size DefaultOverlaySize = new(560, 126);
 
     private readonly Panel _accent = new();
     private readonly Label _title = new();
@@ -17,7 +18,7 @@ internal sealed class StatusOverlayForm : Form
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         TopMost = true;
-        Size = new Size(340, 86);
+        Size = DefaultOverlaySize;
         MinimumSize = Size;
         MaximumSize = Size;
         Padding = new Padding(0);
@@ -43,6 +44,7 @@ internal sealed class StatusOverlayForm : Form
         _message.ForeColor = DarkTheme.MutedText;
         _message.BackColor = Color.Transparent;
         _message.TextAlign = ContentAlignment.TopLeft;
+        _message.AutoEllipsis = true;
 
         var content = new Panel
         {
@@ -66,6 +68,8 @@ internal sealed class StatusOverlayForm : Form
     protected override bool ShowWithoutActivation => true;
 
     internal static int NoActivateExtendedStyleForTest => WsExNoActivate;
+
+    internal static Size DefaultSizeForTest => DefaultOverlaySize;
 
     internal bool ShowWithoutActivationForTest => ShowWithoutActivation;
 
@@ -91,7 +95,7 @@ internal sealed class StatusOverlayForm : Form
     {
         _hideTimer.Stop();
         ApplyStatus(status);
-        PositionNearTray();
+        PositionBottomCenter();
 
         if (!Visible)
         {
@@ -127,6 +131,7 @@ internal sealed class StatusOverlayForm : Form
         {
             DictationStatusKind.Listening => DarkTheme.Accent,
             DictationStatusKind.Transcribing => Color.FromArgb(245, 171, 64),
+            DictationStatusKind.TranscriptPreview => Color.FromArgb(88, 180, 120),
             DictationStatusKind.Pasted => Color.FromArgb(88, 180, 120),
             DictationStatusKind.EmptyTranscript => DarkTheme.MutedText,
             DictationStatusKind.Error => DarkTheme.Danger,
@@ -152,11 +157,26 @@ internal sealed class StatusOverlayForm : Form
         _hideTimer.Start();
     }
 
-    private void PositionNearTray()
+    private void PositionBottomCenter()
     {
         var area = Screen.GetWorkingArea(Cursor.Position);
-        Location = new Point(
-            Math.Max(area.Left + 12, area.Right - Width - 20),
-            Math.Max(area.Top + 12, area.Bottom - Height - 20));
+        Location = CalculateBottomCenterLocation(area, Size);
+    }
+
+    internal static Point CalculateBottomCenterLocationForTest(Rectangle workingArea, Size overlaySize)
+    {
+        return CalculateBottomCenterLocation(workingArea, overlaySize);
+    }
+
+    private static Point CalculateBottomCenterLocation(Rectangle workingArea, Size overlaySize)
+    {
+        const int margin = 20;
+        var centeredX = workingArea.Left + (workingArea.Width - overlaySize.Width) / 2;
+        var minX = workingArea.Left + margin;
+        var maxX = workingArea.Right - overlaySize.Width - margin;
+        var x = maxX < minX ? minX : Math.Clamp(centeredX, minX, maxX);
+        return new Point(
+            x,
+            Math.Max(workingArea.Top + margin, workingArea.Bottom - overlaySize.Height - margin));
     }
 }

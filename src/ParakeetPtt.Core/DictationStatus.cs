@@ -10,6 +10,7 @@ public enum DictationStatusKind
 {
     Listening,
     Transcribing,
+    TranscriptPreview,
     Pasted,
     EmptyTranscript,
     Error
@@ -34,6 +35,24 @@ public static class DictationStatusCatalog
         "Pasted",
         "Transcript pasted into the active app.",
         AutoHide: true);
+
+    public static DictationStatus PastedTranscript(string text)
+    {
+        return new DictationStatus(
+            DictationStatusKind.Pasted,
+            "Pasted",
+            text,
+            AutoHide: true);
+    }
+
+    public static DictationStatus TranscriptPreview(string text)
+    {
+        return new DictationStatus(
+            DictationStatusKind.TranscriptPreview,
+            "Transcript",
+            text,
+            AutoHide: false);
+    }
 
     public static DictationStatus EmptyTranscript { get; } = new(
         DictationStatusKind.EmptyTranscript,
