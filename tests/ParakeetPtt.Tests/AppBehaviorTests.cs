@@ -430,6 +430,35 @@ public sealed class AppBehaviorTests
         Assert.AreEqual(new Point(120, 670), location);
     }
 
+    [TestMethod]
+    public void SessionHistoryWrapsLongTextAndKeepsButtonsVisibleAtMinimumSize()
+    {
+        RunOnStaThread(() =>
+        {
+            var history = new SessionHistory();
+            history.Add("That seems." + Environment.NewLine +
+                "Why did it take longer on Kuda than CBU and CUDA? That seems backwards and should wrap instead of sliding behind a horizontal scrollbar.");
+
+            using var form = new SessionHistoryForm(history)
+            {
+                Size = new Size(520, 420)
+            };
+
+            form.CreateControl();
+            form.PerformLayout();
+
+            var historyText = FindControl<TextBox>(form, textBox => textBox.Multiline);
+            var closeButton = FindControl<Button>(form, button => button.Text == "Close");
+            var quitButton = FindControl<Button>(form, button => button.Text == "Quit App");
+
+            Assert.IsTrue(historyText.WordWrap);
+            Assert.AreEqual(ScrollBars.Vertical, historyText.ScrollBars);
+            StringAssert.Contains(historyText.Text, "Why did it take longer on Kuda than CBU and CUDA?");
+            AssertControlInsideClient(form, closeButton);
+            AssertControlInsideClient(form, quitButton);
+        });
+    }
+
     private static void RunOnStaThread(Action action)
     {
         Exception? exception = null;
@@ -460,5 +489,62 @@ public sealed class AppBehaviorTests
         var bytes = BitConverter.GetBytes(sample);
         buffer[offset] = bytes[0];
         buffer[offset + 1] = bytes[1];
+    }
+
+    private static T FindControl<T>(Control root, Predicate<T> match)
+        where T : Control
+    {
+        foreach (Control child in root.Controls)
+        {
+            if (child is T typed && match(typed))
+            {
+                return typed;
+            }
+
+            var nested = FindControlOrDefault(child, match);
+            if (nested is not null)
+            {
+                return nested;
+            }
+        }
+
+        Assert.Fail($"Expected to find {typeof(T).Name}.");
+        throw new InvalidOperationException($"Expected to find {typeof(T).Name}.");
+    }
+
+    private static T? FindControlOrDefault<T>(Control root, Predicate<T> match)
+        where T : Control
+    {
+        foreach (Control child in root.Controls)
+        {
+            if (child is T typed && match(typed))
+            {
+                return typed;
+            }
+
+            var nested = FindControlOrDefault(child, match);
+            if (nested is not null)
+            {
+                return nested;
+            }
+        }
+
+        return null;
+    }
+
+    private static void AssertControlInsideClient(Form form, Control control)
+    {
+        var topLeft = Point.Empty;
+        for (Control? current = control; current is not null && current != form; current = current.Parent)
+        {
+            topLeft.Offset(current.Location);
+        }
+
+        var bounds = new Rectangle(topLeft, control.Size);
+
+        Assert.IsTrue(bounds.Left >= 0, $"{control.Text} left edge is clipped.");
+        Assert.IsTrue(bounds.Top >= 0, $"{control.Text} top edge is clipped.");
+        Assert.IsTrue(bounds.Right <= form.ClientSize.Width, $"{control.Text} right edge is clipped.");
+        Assert.IsTrue(bounds.Bottom <= form.ClientSize.Height, $"{control.Text} bottom edge is clipped.");
     }
 }

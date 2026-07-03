@@ -5,7 +5,7 @@ namespace ParakeetPtt.App;
 internal sealed class SessionHistoryForm : Form
 {
     private readonly SessionHistory _history;
-    private readonly ListBox _items = new();
+    private readonly TextBox _items = new();
 
     public event EventHandler? QuitRequested;
 
@@ -24,18 +24,15 @@ internal sealed class SessionHistoryForm : Form
 
     public void RefreshItems()
     {
-        _items.Items.Clear();
-
         if (_history.Items.Count == 0)
         {
-            _items.Items.Add("No transcripts yet.");
+            _items.Text = "No transcripts yet.";
             return;
         }
 
-        foreach (var item in _history.Items.Reverse())
-        {
-            _items.Items.Add(item);
-        }
+        _items.Text = string.Join(
+            $"{Environment.NewLine}{Environment.NewLine}",
+            _history.Items.Reverse());
     }
 
     private void BuildLayout()
@@ -64,8 +61,10 @@ internal sealed class SessionHistoryForm : Form
 
         _items.Dock = DockStyle.Fill;
         _items.BorderStyle = BorderStyle.FixedSingle;
-        _items.HorizontalScrollbar = true;
-        _items.IntegralHeight = false;
+        _items.Multiline = true;
+        _items.ReadOnly = true;
+        _items.WordWrap = true;
+        _items.ScrollBars = ScrollBars.Vertical;
         _items.BackColor = DarkTheme.SurfaceRaised;
         _items.ForeColor = DarkTheme.Text;
 
@@ -82,13 +81,15 @@ internal sealed class SessionHistoryForm : Form
 
         var buttons = new FlowLayoutPanel
         {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.RightToLeft,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right,
             AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
             BackColor = DarkTheme.Background
         };
-        buttons.Controls.Add(closeButton);
         buttons.Controls.Add(quitButton);
+        buttons.Controls.Add(closeButton);
 
         layout.Controls.Add(title, 0, 0);
         layout.Controls.Add(_items, 0, 1);
