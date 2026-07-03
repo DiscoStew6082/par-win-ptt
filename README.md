@@ -116,6 +116,22 @@ Real smoke test performed with `parakeet-v0.4.0-bin-win-cpu-x64.zip` and `tdt_ct
 {"text":"Hello parakeet push to talk."}
 ```
 
+Chunked dictation smoke checks on July 3, 2026 with the locally installed CPU runtime and default `tdt_ctc-110m-f16.gguf` model:
+
+- `parakeet-cli transcribe --json` returns word-level `words` timing metadata for `smoke\sample.wav`.
+- `parakeet-cli transcribe --timestamps` prints word timestamps for the same WAV.
+- `parakeet-cli transcribe --stream` is available in the CLI help, but the default model rejects it because streaming requires a cache-aware model such as `parakeet_realtime_eou_120m-v1`.
+
+Manual microphone validation still needs to confirm end-to-end overlay latency and final paste quality on a real input device:
+
+```text
+1. Start Parakeet PTT from a local build.
+2. Hold Right Ctrl and speak for at least 8 seconds with a pause near a chunk boundary.
+3. Confirm partial text appears while recording remains active.
+4. Release Right Ctrl and confirm the final pasted transcript is clean.
+5. Repeat with Right Shift toggle mode and confirm the second press finalizes transcription.
+```
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and pull request guidance.
