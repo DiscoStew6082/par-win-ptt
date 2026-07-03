@@ -4,6 +4,17 @@
 
 Parakeet PTT is a local Windows push-to-talk dictation tray app. Hold Right Ctrl, speak, release, and the app records a temporary 16 kHz mono WAV, transcribes it with `parakeet-cli`, normalizes the transcript, pastes it into the active app, and restores your previous clipboard when possible.
 
+## 30-second proof
+
+- **Problem:** Fast dictation should not require a cloud speech service or a browser tab.
+- **System:** Native Windows tray app that captures audio, runs local Parakeet speech-to-text, and pastes the cleaned transcript into the active app.
+- **Boundary:** Audio and transcripts stay local during transcription; first-use runtime/model downloads are explicit third-party asset fetches.
+- **Safety:** Downloaded runtimes and built-in models are checked with pinned SHA-256 hashes, runtime archives are validated before extraction, and temporary recordings are deleted after use.
+- **Proof surface:** Windows CI, locked NuGet restore, package audit, release packaging, SHA-256 checksum, CycloneDX SBOM, and public-build artifact attestation.
+- **Stack:** C#, .NET 10, Windows Forms, WinMM audio capture, low-level keyboard hook, `parakeet.cpp`, GGUF models, GitHub Actions.
+
+**Recruiter signal:** This project demonstrates local-AI product integration, native Windows API work, secure asset handling, and release engineering rather than only model prompting.
+
 ## Features
 
 - Right Ctrl push-to-talk dictation from the system tray.
@@ -12,6 +23,29 @@ Parakeet PTT is a local Windows push-to-talk dictation tray app. Hold Right Ctrl
 - Session-only transcript history.
 - Runtime/model path overrides for local experimentation.
 - Dark-mode-first Windows Forms UI.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A[Right Ctrl push-to-talk<br/>or Right Shift toggle] --> B[WinMM records<br/>16 kHz mono WAV]
+    B --> C[parakeet-cli<br/>transcribe --json]
+    C --> D[Normalize transcript]
+    D --> E[Paste into active app<br/>through clipboard]
+    E --> F[Restore prior clipboard<br/>and delete temp WAV]
+    G[First use] --> H[Download runtime/model<br/>under %LOCALAPPDATA%]
+    H --> I[Verify SHA-256<br/>and validate archive paths]
+    I --> C
+```
+
+Implementation highlights:
+
+- **Native shell UX:** `NotifyIcon` tray app, dark Windows Forms settings/history windows, non-activating topmost status overlay, and audible state feedback.
+- **Audio path:** Direct WinMM capture writes 16-bit, 16 kHz, mono PCM WAV files for `parakeet-cli`.
+- **Runtime management:** CUDA is preferred by default, with an automatic CPU retry path if CUDA transcription fails.
+- **Asset integrity:** Runtime zip files and built-in GGUF models use pinned SHA-256 checks; extracted runtime files are revalidated through a manifest.
+- **Archive hardening:** Runtime zip entries are checked before extraction so archive paths cannot escape the runtime directory.
+- **Operational polish:** Process timeout/cancellation handling, single-instance guard, best-effort clipboard restoration, session-only transcript history, and cleanup warnings if a temporary WAV cannot be deleted.
 
 ## Privacy
 
@@ -107,6 +141,13 @@ Get-FileHash .\ParakeetPtt-win-x64.zip -Algorithm SHA256
 ```
 
 Release builds from this repository publish the zip, checksum, and CycloneDX SBOM. Public tag builds also create a GitHub artifact attestation. Tag builds create a draft GitHub Release so maintainers can review assets before publishing. Recommended additional hardening for broad public distribution includes code signing.
+
+## Current limitations
+
+- Supported builds target Windows 10/11 on x64 only.
+- The current controls are Right Ctrl for push-to-talk and Right Shift for toggle dictation.
+- First use requires large runtime/model downloads unless you configure trusted local paths.
+- Release artifacts are not code-signed yet, so Windows SmartScreen may warn on broad public distribution.
 
 ## Validation
 

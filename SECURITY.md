@@ -19,9 +19,7 @@ Release artifacts should publish SHA-256 checksums at minimum. The repository re
 
 Please report security concerns privately before opening a public issue.
 
-Before this repository is made public, enable GitHub private vulnerability reporting in the repository security settings. Once enabled, use that channel for vulnerability reports.
-
-If private vulnerability reporting is not available yet, contact the maintainer out of band and do not include exploit details, sensitive audio, transcripts, credentials, or proof-of-concept payloads in a public issue.
+Use GitHub private vulnerability reporting if it is enabled for this repository. If that channel is not available, contact the maintainer out of band and do not include exploit details, sensitive audio, transcripts, credentials, or proof-of-concept payloads in a public issue.
 
 Include:
 
