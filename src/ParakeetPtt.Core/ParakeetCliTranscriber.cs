@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 
 namespace ParakeetPtt.Core;
@@ -109,6 +111,100 @@ public sealed class ParakeetCliTranscriber(CliTranscriberOptions options, IProce
             && property.ValueKind == JsonValueKind.Number
             && property.TryGetDouble(out seconds);
     }
+}
+
+public sealed partial class ParakeetStreamingCliTranscriber(CliTranscriberOptions options, IProcessRunner processRunner) : ITranscriber
+{
+    public async Task<TranscriptResult> TranscribeAsync(string wavPath, CancellationToken cancellationToken)
+    {
+        var cliDirectory = Path.GetDirectoryName(options.CliPath);
+        var request = new ProcessRequest(
+            options.CliPath,
+            ["transcribe", "--model", options.ModelPath, "--input", wavPath, "--stream", "--timestamps"],
+            options.Timeout ?? TimeSpan.FromMinutes(2),
+            cliDirectory,
+            RuntimePathBuilder.GetRuntimeSearchPaths(options.CliPath));
+
+        var result = await processRunner.RunAsync(request, cancellationToken);
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"parakeet-cli streaming failed with exit code {result.ExitCode}: {result.StandardError}");
+        }
+
+        return Parse(result.StandardOutput, result.Elapsed);
+    }
+
+    public static TranscriptResult Parse(string output, TimeSpan elapsed)
+    {
+        var finalText = ReadFinalText(output)
+            ?? throw new InvalidOperationException("parakeet-cli streaming output did not include a final transcript.");
+        return new TranscriptResult(finalText, elapsed, null, ReadTimestampWords(output));
+    }
+
+    private static string? ReadFinalText(string output)
+    {
+        foreach (var line in SplitLines(output).Reverse())
+        {
+            var match = FinalLineRegex().Match(line);
+            if (match.Success)
+            {
+                return CleanSpecialTokens(match.Groups["text"].Value.Trim());
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<TranscriptWord> ReadTimestampWords(string output)
+    {
+        var words = new List<TranscriptWord>();
+        foreach (var line in SplitLines(output))
+        {
+            var match = TimestampLineRegex().Match(line);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            if (!TryParseSeconds(match.Groups["start"].Value, out var start)
+                || !TryParseSeconds(match.Groups["end"].Value, out var end))
+            {
+                continue;
+            }
+
+            double? confidence = TryParseSeconds(match.Groups["confidence"].Value, out var parsedConfidence)
+                ? parsedConfidence
+                : null;
+            words.Add(new TranscriptWord(
+                CleanSpecialTokens(match.Groups["word"].Value.Trim()),
+                TimeSpan.FromSeconds(start),
+                TimeSpan.FromSeconds(end),
+                confidence));
+        }
+
+        return words;
+    }
+
+    private static bool TryParseSeconds(string value, out double seconds)
+    {
+        return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out seconds);
+    }
+
+    private static string CleanSpecialTokens(string text)
+    {
+        return text.Replace("<EOU>", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
+    }
+
+    private static string[] SplitLines(string text)
+    {
+        return text.Split(["\r\n", "\n"], StringSplitOptions.None);
+    }
+
+    [GeneratedRegex(@"^\[stream:final\]\s*(?<text>.*)$")]
+    private static partial Regex FinalLineRegex();
+
+    [GeneratedRegex(@"^\s*(?<start>\d+(?:\.\d+)?)\-(?<end>\d+(?:\.\d+)?)\s+(?<word>.+?)\s+\((?<confidence>\d+(?:\.\d+)?)\)\s*$")]
+    private static partial Regex TimestampLineRegex();
 }
 
 public interface IProcessRunner

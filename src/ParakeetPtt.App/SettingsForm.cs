@@ -1,4 +1,5 @@
 using ParakeetPtt.Core;
+using System.ComponentModel;
 
 namespace ParakeetPtt.App;
 
@@ -10,6 +11,7 @@ internal sealed class SettingsForm : Form
     private readonly TextBox _hotkey = new();
     private readonly TextBox _runtimePath = new();
     private readonly TextBox _modelPath = new();
+    private readonly ComboBox _mode = new();
     private readonly ComboBox _device = new();
     private readonly CheckBox _notifications = new();
     private readonly CheckBox _sounds = new();
@@ -93,8 +95,11 @@ internal sealed class SettingsForm : Form
         _model.Dock = DockStyle.Top;
         _model.DropDownStyle = ComboBoxStyle.DropDownList;
         _model.DisplayMember = nameof(ModelInfo.DisplayName);
-        _model.ValueMember = nameof(ModelInfo.Id);
-        _model.DataSource = _modelRegistry.Models.ToList();
+        _model.Items.AddRange(_modelRegistry.Models.Cast<object>().ToArray());
+        _model.SelectedIndexChanged += (_, _) => RefreshModeOptions(SelectedModelFromControl());
+
+        _mode.Dock = DockStyle.Top;
+        _mode.DropDownStyle = ComboBoxStyle.DropDownList;
 
         _runtimePath.Dock = DockStyle.Fill;
         _runtimePath.PlaceholderText = "Auto-download on first dictation";
@@ -104,7 +109,7 @@ internal sealed class SettingsForm : Form
 
         _device.Dock = DockStyle.Top;
         _device.DropDownStyle = ComboBoxStyle.DropDownList;
-        _device.DataSource = Enum.GetValues<DevicePreference>();
+        _device.Items.AddRange(Enum.GetValues<DevicePreference>().Cast<object>().ToArray());
 
         _notifications.Text = "Show tray notifications";
         _notifications.AutoSize = true;
@@ -119,6 +124,7 @@ internal sealed class SettingsForm : Form
 
         AddField(fields, "Push-to-talk hotkey", _hotkey);
         AddField(fields, "Model", _model);
+        AddField(fields, "Transcription mode", _mode);
         AddPathField(fields, "Runtime path (optional)", _runtimePath, "Blank uses %LOCALAPPDATA%\\ParakeetPtt\\runtimes and downloads the selected runtime automatically.");
         AddPathField(fields, "Model path (optional)", _modelPath, "Blank uses %LOCALAPPDATA%\\ParakeetPtt\\models and downloads the selected model automatically.");
         AddField(fields, "Device preference", _device);
@@ -221,35 +227,145 @@ internal sealed class SettingsForm : Form
         _runtimePath.Text = settings.RuntimePath ?? string.Empty;
         _modelPath.Text = settings.ModelPath ?? string.Empty;
         _device.SelectedItem = settings.DevicePreference;
+        _mode.SelectedItem = settings.TranscriptionMode;
         _notifications.Checked = settings.NotificationsEnabled;
         _sounds.Checked = settings.AudibleStatusEnabled;
 
         var selected = _modelRegistry.Find(settings.SelectedModelId) ?? _modelRegistry.DefaultModel;
-        _model.SelectedValue = selected.Id;
+        _model.SelectedItem = selected;
+        RefreshModeOptions(selected);
+        _mode.SelectedItem = ModeSupportedByModel(settings.TranscriptionMode, selected)
+            ? settings.TranscriptionMode
+            : TranscriptionMode.Auto;
     }
 
     private async Task SaveAsync()
     {
-        var selectedModelId = _model.SelectedValue as string ?? _modelRegistry.DefaultModel.Id;
-        _settings = _settings with
-        {
-            Hotkey = string.IsNullOrWhiteSpace(_hotkey.Text) ? AppSettings.Default.Hotkey : _hotkey.Text.Trim(),
-            SelectedModelId = selectedModelId,
-            RuntimePath = EmptyToNull(_runtimePath.Text),
-            ModelPath = EmptyToNull(_modelPath.Text),
-            DevicePreference = _device.SelectedItem is DevicePreference preference ? preference : DevicePreference.Cuda,
-            NotificationsEnabled = _notifications.Checked,
-            AudibleStatusEnabled = _sounds.Checked
-        };
+        _settings = BuildSettingsFromControls();
 
         await _settingsStore.SaveAsync(_settings, CancellationToken.None);
         SettingsSaved?.Invoke(this, _settings);
         Hide();
     }
 
+    private AppSettings BuildSettingsFromControls()
+    {
+        var selectedModelId = SelectedModelIdFromControl();
+        var selectedModel = SelectedModelFromControl();
+        var requestedMode = _mode.SelectedItem is TranscriptionMode mode ? mode : TranscriptionMode.Auto;
+        var selectedMode = ModeSupportedByModel(requestedMode, selectedModel)
+            ? requestedMode
+            : TranscriptionMode.Auto;
+        var modelPath = EmptyToNull(_modelPath.Text);
+        if (!string.Equals(selectedModelId, _settings.SelectedModelId, StringComparison.OrdinalIgnoreCase)
+            && IsPreviousAutoModelPath(modelPath))
+        {
+            modelPath = null;
+        }
+
+        return _settings with
+        {
+            Hotkey = string.IsNullOrWhiteSpace(_hotkey.Text) ? AppSettings.Default.Hotkey : _hotkey.Text.Trim(),
+            SelectedModelId = selectedModelId,
+            TranscriptionMode = selectedMode,
+            RuntimePath = EmptyToNull(_runtimePath.Text),
+            ModelPath = modelPath,
+            DevicePreference = _device.SelectedItem is DevicePreference preference ? preference : DevicePreference.Cuda,
+            NotificationsEnabled = _notifications.Checked,
+            AudibleStatusEnabled = _sounds.Checked
+        };
+    }
+
+    private string SelectedModelIdFromControl()
+    {
+        return SelectedModelFromControl().Id;
+    }
+
+    private ModelInfo SelectedModelFromControl()
+    {
+        return _model.SelectedItem is ModelInfo model ? model : _modelRegistry.DefaultModel;
+    }
+
+    private void RefreshModeOptions(ModelInfo model)
+    {
+        var selected = _mode.SelectedItem is TranscriptionMode mode ? mode : TranscriptionMode.Auto;
+        _mode.Items.Clear();
+        _mode.Items.Add(TranscriptionMode.Auto);
+        if (model.SupportsBatch)
+        {
+            _mode.Items.Add(TranscriptionMode.Batch);
+        }
+
+        if (model.SupportsStreaming)
+        {
+            _mode.Items.Add(TranscriptionMode.Streaming);
+        }
+
+        _mode.SelectedItem = ModeSupportedByModel(selected, model) ? selected : TranscriptionMode.Auto;
+    }
+
+    private static bool ModeSupportedByModel(TranscriptionMode mode, ModelInfo model)
+    {
+        return mode switch
+        {
+            TranscriptionMode.Batch => model.SupportsBatch,
+            TranscriptionMode.Streaming => model.SupportsStreaming,
+            _ => true
+        };
+    }
+
+    private bool IsPreviousAutoModelPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        var previousModel = _modelRegistry.Find(_settings.SelectedModelId);
+        return previousModel is not null
+            && string.Equals(
+                Path.GetFileName(path),
+                Path.GetFileName(previousModel.DownloadUrl.LocalPath),
+                StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string? EmptyToNull(string value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal TranscriptionMode SelectedTranscriptionModeForTest
+    {
+        get => _mode.SelectedItem is TranscriptionMode mode ? mode : TranscriptionMode.Auto;
+        set
+        {
+            if (!_mode.Items.Contains(value))
+            {
+                _mode.Items.Add(value);
+            }
+
+            _mode.SelectedItem = value;
+        }
+    }
+
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal string SelectedModelIdForTest
+    {
+        get => SelectedModelIdFromControl();
+        set => _model.SelectedItem = _modelRegistry.Find(value) ?? _modelRegistry.DefaultModel;
+    }
+
+    internal void SaveForTest()
+    {
+        SaveAsync().GetAwaiter().GetResult();
+    }
+
+    internal AppSettings BuildSettingsForTest()
+    {
+        return BuildSettingsFromControls();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)

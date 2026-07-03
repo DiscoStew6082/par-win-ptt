@@ -460,6 +460,45 @@ public sealed class CoreBehaviorTests
     }
 
     [TestMethod]
+    public async Task ParakeetStreamingCliTranscriberConstructsStreamCommandAndParsesFinalTextWithTimestamps()
+    {
+        var output = """
+            [stream] hello parakeet pushed to talk [EOU @ 2.56s]
+            [stream:final] hello parakeet pushed to talk
+            0.32-0.40  hello  (1.00)
+            0.80-1.36  parakeet  (0.52)
+            1.36-1.52  pushed  (0.83)
+            1.60-1.68  to  (0.93)
+            1.76-1.84  talk  (0.99)
+            """;
+        var runner = new FakeProcessRunner(output);
+        var transcriber = new ParakeetStreamingCliTranscriber(
+            new CliTranscriberOptions("C:\\tools\\parakeet-cli.exe", "C:\\models\\realtime_eou_120m-v1-q8_0.gguf"),
+            runner);
+
+        var result = await transcriber.TranscribeAsync("C:\\temp\\speech.wav", CancellationToken.None);
+
+        Assert.AreEqual("hello parakeet pushed to talk", result.Text);
+        Assert.AreEqual(5, result.Words.Count);
+        Assert.AreEqual("hello", result.Words[0].Text);
+        Assert.AreEqual(TimeSpan.FromSeconds(0.32), result.Words[0].Start);
+        Assert.AreEqual(TimeSpan.FromSeconds(0.40), result.Words[0].End);
+        Assert.AreEqual(1.00, result.Words[0].Confidence);
+        Assert.AreEqual("talk", result.Words[4].Text);
+        Assert.AreEqual("C:\\tools\\parakeet-cli.exe", runner.LastRequest?.FileName);
+        CollectionAssert.AreEqual(
+            new[] { "transcribe", "--model", "C:\\models\\realtime_eou_120m-v1-q8_0.gguf", "--input", "C:\\temp\\speech.wav", "--stream", "--timestamps" },
+            runner.LastRequest?.Arguments.ToArray());
+    }
+
+    [TestMethod]
+    public void ParakeetStreamingCliParserRejectsOutputWithoutFinalLine()
+    {
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => ParakeetStreamingCliTranscriber.Parse("[stream] still unstable", TimeSpan.FromMilliseconds(12)));
+    }
+
+    [TestMethod]
     public void RuntimePathBuilderIncludesSiblingCudaDllDirectories()
     {
         var root = Path.Combine(Path.GetTempPath(), $"parakeet-runtime-paths-{Guid.NewGuid():N}");
@@ -500,6 +539,7 @@ public sealed class CoreBehaviorTests
         var saved = AppSettings.Default with
         {
             SelectedModelId = "tdt-0.6b-v3-f16",
+            TranscriptionMode = TranscriptionMode.Streaming,
             DevicePreference = DevicePreference.Cpu,
             NotificationsEnabled = false,
             AudibleStatusEnabled = false
@@ -509,6 +549,7 @@ public sealed class CoreBehaviorTests
         var loaded = await store.LoadAsync(CancellationToken.None);
 
         Assert.AreEqual(saved.SelectedModelId, loaded.SelectedModelId);
+        Assert.AreEqual(TranscriptionMode.Streaming, loaded.TranscriptionMode);
         Assert.AreEqual(DevicePreference.Cpu, loaded.DevicePreference);
         Assert.IsFalse(loaded.NotificationsEnabled);
         Assert.IsFalse(loaded.AudibleStatusEnabled);
@@ -527,6 +568,45 @@ public sealed class CoreBehaviorTests
         Assert.IsTrue(registry.DefaultModel.MinimumBytes > 0);
         Assert.AreEqual("7f9a6376edde6a74592ace48b2ebdc27a1ac972d0be9dfcc29e668d99381faf1", registry.DefaultModel.Sha256);
         Assert.AreEqual("8ba47343e1e919895aca90e099150a01ed203ee0942d8ed31e27295efc5abb22", multilingual?.Sha256);
+    }
+
+    [TestMethod]
+    public void ModelRegistryExposesRealtimeStreamingModelsWithPinnedHashes()
+    {
+        var registry = ModelRegistry.CreateDefault();
+        var q8 = registry.Find("realtime-eou-120m-v1-q8_0");
+        var f16 = registry.Find("realtime-eou-120m-v1-f16");
+
+        Assert.IsNotNull(q8);
+        Assert.IsNotNull(f16);
+        Assert.IsTrue(q8.SupportsStreaming);
+        Assert.IsTrue(q8.SupportsBatch);
+        Assert.AreEqual("q8_0", q8.Quantization);
+        StringAssert.EndsWith(q8.DownloadUrl.ToString(), "realtime_eou_120m-v1-q8_0.gguf");
+        Assert.AreEqual("62616b914d6f5a683a5dea672df055b57de5c49dddf871b8b44b9c814dc3d896", q8.Sha256);
+        Assert.IsTrue(f16.SupportsStreaming);
+        Assert.AreEqual("F16", f16.Quantization);
+        Assert.AreEqual("d1a2b12f12b8a096a57499c9111ed13b442a2b786e17a292c168be45088f0edc", f16.Sha256);
+    }
+
+    [TestMethod]
+    public void TranscriberSelectionUsesStreamingOnlyWhenModeAndModelAllowIt()
+    {
+        var registry = ModelRegistry.CreateDefault();
+        var batch = registry.DefaultModel;
+        var streaming = registry.Find("realtime-eou-120m-v1-q8_0")!;
+
+        Assert.AreEqual(
+            TranscriberKind.Batch,
+            TranscriberSelection.Resolve(AppSettings.Default with { TranscriptionMode = TranscriptionMode.Auto }, batch));
+        Assert.AreEqual(
+            TranscriberKind.Streaming,
+            TranscriberSelection.Resolve(AppSettings.Default with { TranscriptionMode = TranscriptionMode.Auto }, streaming));
+        Assert.AreEqual(
+            TranscriberKind.Batch,
+            TranscriberSelection.Resolve(AppSettings.Default with { TranscriptionMode = TranscriptionMode.Batch }, streaming));
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => TranscriberSelection.Resolve(AppSettings.Default with { TranscriptionMode = TranscriptionMode.Streaming }, batch));
     }
 
     [TestMethod]

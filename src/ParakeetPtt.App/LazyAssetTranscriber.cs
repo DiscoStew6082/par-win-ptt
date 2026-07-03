@@ -10,7 +10,8 @@ internal sealed class LazyAssetTranscriber(
     Action<string> reportStatus) : ITranscriber
 {
     private readonly SemaphoreSlim _setupLock = new(1, 1);
-    private ParakeetCliTranscriber? _inner;
+    private ITranscriber? _inner;
+    private TranscriberCacheKey? _cacheKey;
 
     public async Task<TranscriptResult> TranscribeAsync(string wavPath, CancellationToken cancellationToken)
     {
@@ -30,14 +31,16 @@ internal sealed class LazyAssetTranscriber(
             updateSettings(settings);
             await settingsStore.SaveAsync(settings, cancellationToken);
             _inner = null;
+            _cacheKey = null;
             inner = await EnsureInnerAsync(cancellationToken);
             return await inner.TranscribeAsync(wavPath, cancellationToken);
         }
     }
 
-    private async Task<ParakeetCliTranscriber> EnsureInnerAsync(CancellationToken cancellationToken)
+    private async Task<ITranscriber> EnsureInnerAsync(CancellationToken cancellationToken)
     {
-        if (_inner is not null)
+        var startingSettings = getSettings();
+        if (_inner is not null && _cacheKey?.Matches(startingSettings) == true)
         {
             return _inner;
         }
@@ -45,7 +48,7 @@ internal sealed class LazyAssetTranscriber(
         await _setupLock.WaitAsync(cancellationToken);
         try
         {
-            if (_inner is not null)
+            if (_inner is not null && _cacheKey?.Matches(getSettings()) == true)
             {
                 return _inner;
             }
@@ -61,11 +64,11 @@ internal sealed class LazyAssetTranscriber(
                 runtimePath = await manager.EnsureRuntimeAsync(runtime, cancellationToken);
             }
 
+            var registry = ModelRegistry.CreateDefault();
+            var model = registry.Find(settings.SelectedModelId) ?? registry.DefaultModel;
             var modelPath = settings.ModelPath;
             if (string.IsNullOrWhiteSpace(modelPath) || !File.Exists(modelPath))
             {
-                var registry = ModelRegistry.CreateDefault();
-                var model = registry.Find(settings.SelectedModelId) ?? registry.DefaultModel;
                 reportStatus($"Downloading/verifying {model.DisplayName}.");
                 modelPath = await manager.EnsureModelAsync(model, cancellationToken);
             }
@@ -74,14 +77,39 @@ internal sealed class LazyAssetTranscriber(
             updateSettings(settings);
             await settingsStore.SaveAsync(settings, cancellationToken);
 
-            _inner = new ParakeetCliTranscriber(
-                new CliTranscriberOptions(runtimePath, modelPath, TimeSpan.FromMinutes(5)),
-                new SystemProcessRunner());
+            var kind = TranscriberSelection.Resolve(settings, model);
+            var options = new CliTranscriberOptions(runtimePath, modelPath, TimeSpan.FromMinutes(5));
+            _inner = kind == TranscriberKind.Streaming
+                ? new ParakeetStreamingCliTranscriber(options, new SystemProcessRunner())
+                : new ParakeetCliTranscriber(options, new SystemProcessRunner());
+            _cacheKey = new TranscriberCacheKey(
+                settings.SelectedModelId,
+                settings.TranscriptionMode,
+                settings.DevicePreference,
+                runtimePath,
+                modelPath);
             return _inner;
         }
         finally
         {
             _setupLock.Release();
+        }
+    }
+
+    private sealed record TranscriberCacheKey(
+        string SelectedModelId,
+        TranscriptionMode TranscriptionMode,
+        DevicePreference DevicePreference,
+        string RuntimePath,
+        string ModelPath)
+    {
+        public bool Matches(AppSettings settings)
+        {
+            return string.Equals(SelectedModelId, settings.SelectedModelId, StringComparison.OrdinalIgnoreCase)
+                && TranscriptionMode == settings.TranscriptionMode
+                && DevicePreference == settings.DevicePreference
+                && string.Equals(RuntimePath, settings.RuntimePath, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(ModelPath, settings.ModelPath, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

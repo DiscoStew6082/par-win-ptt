@@ -22,6 +22,62 @@ public sealed class AppBehaviorTests
     }
 
     [TestMethod]
+    public void SettingsFormBuildsSelectedTranscriptionMode()
+    {
+        RunOnStaThread(() =>
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"parakeet-settings-form-{Guid.NewGuid():N}.json");
+            using var form = new SettingsForm(new AppSettingsStore(path), ModelRegistry.CreateDefault());
+            form.UseSettings(AppSettings.Default);
+
+            form.SelectedModelIdForTest = "realtime-eou-120m-v1-q8_0";
+            form.SelectedTranscriptionModeForTest = TranscriptionMode.Streaming;
+            var settings = form.BuildSettingsForTest();
+
+            Assert.AreEqual("realtime-eou-120m-v1-q8_0", settings.SelectedModelId);
+            Assert.AreEqual(TranscriptionMode.Streaming, settings.TranscriptionMode);
+        });
+    }
+
+    [TestMethod]
+    public void SettingsFormClearsAutoModelPathWhenBuiltInModelChanges()
+    {
+        RunOnStaThread(() =>
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"parakeet-settings-form-{Guid.NewGuid():N}.json");
+            using var form = new SettingsForm(new AppSettingsStore(path), ModelRegistry.CreateDefault());
+            form.UseSettings(AppSettings.Default with
+            {
+                SelectedModelId = ModelRegistry.DefaultModelId,
+                ModelPath = "C:\\Users\\stewa\\AppData\\Local\\ParakeetPtt\\models\\tdt_ctc-110m-f16.gguf"
+            });
+
+            form.SelectedModelIdForTest = "realtime-eou-120m-v1-q8_0";
+            var settings = form.BuildSettingsForTest();
+
+            Assert.AreEqual("realtime-eou-120m-v1-q8_0", settings.SelectedModelId);
+            Assert.IsNull(settings.ModelPath);
+        });
+    }
+
+    [TestMethod]
+    public void SettingsFormFallsBackToAutoWhenStreamingModeIsNotValidForSelectedModel()
+    {
+        RunOnStaThread(() =>
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"parakeet-settings-form-{Guid.NewGuid():N}.json");
+            using var form = new SettingsForm(new AppSettingsStore(path), ModelRegistry.CreateDefault());
+            form.UseSettings(AppSettings.Default);
+
+            form.SelectedTranscriptionModeForTest = TranscriptionMode.Streaming;
+            var settings = form.BuildSettingsForTest();
+
+            Assert.AreEqual(ModelRegistry.DefaultModelId, settings.SelectedModelId);
+            Assert.AreEqual(TranscriptionMode.Auto, settings.TranscriptionMode);
+        });
+    }
+
+    [TestMethod]
     public void StatusOverlayAutoHidesCompletionStatesWithoutShowingWindow()
     {
         RunOnStaThread(() =>

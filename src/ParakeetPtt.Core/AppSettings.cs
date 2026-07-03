@@ -7,6 +7,7 @@ public sealed record AppSettings
 {
     public string Hotkey { get; init; } = "RightCtrl";
     public string SelectedModelId { get; init; } = ModelRegistry.DefaultModelId;
+    public TranscriptionMode TranscriptionMode { get; init; } = TranscriptionMode.Auto;
     public string? RuntimePath { get; init; }
     public string? ModelPath { get; init; }
     public DevicePreference DevicePreference { get; init; } = DevicePreference.Cuda;
@@ -14,6 +15,14 @@ public sealed record AppSettings
     public bool AudibleStatusEnabled { get; init; } = true;
 
     public static AppSettings Default { get; } = new();
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<TranscriptionMode>))]
+public enum TranscriptionMode
+{
+    Auto,
+    Batch,
+    Streaming
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<DevicePreference>))]

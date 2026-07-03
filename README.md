@@ -82,6 +82,13 @@ Expect first-run downloads to be hundreds of MB for the default model and runtim
 
 Open the tray menu for settings, session-only transcript history, and runtime/model path overrides.
 
+To try native streaming, open settings and select one of the experimental realtime models:
+
+- `Parakeet Realtime EOU 120M Q8_0`
+- `Parakeet Realtime EOU 120M F16`
+
+Leave transcription mode on `Auto` to use native `parakeet-cli --stream` for streaming-capable models and the existing batch/chunked path for batch models. Choose `Batch` or `Streaming` to force a mode while testing.
+
 ## Downloaded Assets
 
 This repository is licensed under MIT. The runtime and model assets downloaded on first use are third-party artifacts from their upstream projects:
@@ -141,6 +148,14 @@ Manual microphone validation still needs to confirm end-to-end overlay latency a
 4. Release Right Ctrl and confirm the final pasted transcript is clean.
 5. Repeat with Right Shift toggle mode and confirm the second press finalizes transcription.
 ```
+
+Realtime streaming model smoke can be rerun with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Test-RealtimeStreaming.ps1 -Runtime both -Iterations 3
+```
+
+The script downloads/verifies the two realtime EOU models through `hf` when needed, runs the local smoke WAV through the CPU and CUDA runtimes, and writes `smoke\streaming-smoke-results.md`.
 
 ## Contributing
 
