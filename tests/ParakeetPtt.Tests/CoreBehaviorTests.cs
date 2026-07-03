@@ -198,7 +198,7 @@ public sealed class CoreBehaviorTests
             ["/c", "ping", "127.0.0.1", "-n", "6"],
             TimeSpan.FromSeconds(30));
 
-        await Assert.ThrowsExceptionAsync<OperationCanceledException>(
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
             () => runner.RunAsync(request, cancellation.Token));
     }
 
@@ -358,7 +358,7 @@ public sealed class CoreBehaviorTests
             "runtime.zip",
             DevicePreference.Cuda);
 
-        await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
             () => manager.EnsureRuntimeAsync(runtime, CancellationToken.None));
         Assert.IsFalse(File.Exists(Path.Combine(root, "evil.txt")));
         Directory.Delete(root, recursive: true);
