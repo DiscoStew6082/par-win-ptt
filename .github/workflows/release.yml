@@ -95,5 +95,6 @@ jobs:
             publish\ParakeetPtt-win-x64.zip.sha256 `
             publish\ParakeetPtt.cdx.json `
             --draft `
+            --repo $env:GITHUB_REPOSITORY `
             --title $env:GITHUB_REF_NAME `
             --notes "See README.md and SECURITY.md for privacy, verification, and third-party runtime/model asset notes."
