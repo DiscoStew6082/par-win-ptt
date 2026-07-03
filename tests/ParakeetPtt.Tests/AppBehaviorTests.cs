@@ -140,6 +140,104 @@ public sealed class AppBehaviorTests
     }
 
     [TestMethod]
+    public void PcmChunkBufferWaitsForEnoughAudioBeforeCreatingChunk()
+    {
+        var buffer = new PcmChunkBuffer(bytesPerSecond: 4, chunkBytes: 8, overlapBytes: 2);
+
+        buffer.Append([1, 2, 3, 4]);
+
+        Assert.IsNull(buffer.TryCreateChunk("chunk.wav"));
+        CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, buffer.ToArray());
+    }
+
+    [TestMethod]
+    public void PcmChunkBufferCreatesOverlappedChunks()
+    {
+        var buffer = new PcmChunkBuffer(bytesPerSecond: 4, chunkBytes: 8, overlapBytes: 2);
+
+        buffer.Append([1, 2, 3, 4, 5, 6, 7, 8]);
+        var first = buffer.TryCreateChunk("chunk-1.wav");
+        buffer.Append([9, 10, 11, 12, 13, 14]);
+        var second = buffer.TryCreateChunk("chunk-2.wav");
+
+        Assert.IsNotNull(first);
+        Assert.AreEqual("chunk-1.wav", first.Path);
+        CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, first.Pcm);
+        Assert.AreEqual(TimeSpan.FromSeconds(2), first.Duration);
+        Assert.IsNotNull(second);
+        CollectionAssert.AreEqual(new byte[] { 7, 8, 9, 10, 11, 12, 13, 14 }, second.Pcm);
+        Assert.AreEqual(TimeSpan.FromSeconds(2), second.Duration);
+        CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 }, buffer.ToArray());
+    }
+
+    [TestMethod]
+    public void PcmChunkBufferKeepsChunksFixedSizeAfterLargeAppend()
+    {
+        var buffer = new PcmChunkBuffer(bytesPerSecond: 4, chunkBytes: 8, overlapBytes: 2);
+
+        buffer.Append([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+        var first = buffer.TryCreateChunk("chunk-1.wav");
+        var second = buffer.TryCreateChunk("chunk-2.wav");
+        var third = buffer.TryCreateChunk("chunk-3.wav");
+
+        Assert.IsNotNull(first);
+        CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, first.Pcm);
+        Assert.IsNotNull(second);
+        CollectionAssert.AreEqual(new byte[] { 7, 8, 9, 10, 11, 12, 13, 14 }, second.Pcm);
+        Assert.IsNull(third);
+        CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }, buffer.ToArray());
+    }
+
+    [TestMethod]
+    public void AudioChunkPublisherDeletesChunkWhenHandlerIsMissing()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"parakeet-late-chunk-{Guid.NewGuid():N}.wav");
+        var deletedPaths = new List<string>();
+
+        AudioChunkPublisher.Publish(
+            new PendingAudioChunk(path, [1, 2, 3, 4], TimeSpan.FromSeconds(1)),
+            handler: null,
+            writeWav: (chunkPath, pcm) => File.WriteAllBytes(chunkPath, pcm),
+            delete: chunkPath =>
+            {
+                deletedPaths.Add(chunkPath);
+                File.Delete(chunkPath);
+            });
+
+        CollectionAssert.AreEqual(new[] { path }, deletedPaths.ToArray());
+        Assert.IsFalse(File.Exists(path));
+    }
+
+    [TestMethod]
+    public void AudioChunkPublisherPublishesWrittenChunkWhenHandlerExists()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"parakeet-published-chunk-{Guid.NewGuid():N}.wav");
+        RecordedAudio? published = null;
+
+        try
+        {
+            AudioChunkPublisher.Publish(
+                new PendingAudioChunk(path, [1, 2, 3, 4], TimeSpan.FromSeconds(1)),
+                audio => published = audio,
+                writeWav: (chunkPath, pcm) => File.WriteAllBytes(chunkPath, pcm),
+                delete: File.Delete);
+
+            Assert.IsNotNull(published);
+            Assert.AreEqual(path, published.Path);
+            Assert.AreEqual(TimeSpan.FromSeconds(1), published.Duration);
+            Assert.IsTrue(published.DeleteAfterUse);
+            CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, File.ReadAllBytes(path));
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    [TestMethod]
     public void StatusOverlayRunsLiveActivityOnlyWhileListening()
     {
         RunOnStaThread(() =>
