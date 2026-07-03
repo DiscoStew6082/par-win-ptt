@@ -13,7 +13,7 @@ Security fixes are intended for the latest release only. Supported builds target
 - The low-level keyboard hook is used to detect the push-to-talk hotkey while the app is running.
 - Runtime/model downloads contact upstream hosts on first use unless local paths are configured.
 
-Release artifacts should publish SHA-256 checksums at minimum. Code signing, SBOMs, and provenance attestations are recommended for public distribution.
+Release artifacts should publish SHA-256 checksums at minimum. The repository release workflow also produces a CycloneDX SBOM and GitHub artifact attestations. Code signing is recommended for broad public distribution.
 
 ## Reporting a Vulnerability
 

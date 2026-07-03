@@ -28,3 +28,6 @@ jobs:
 
       - name: Test
         run: dotnet test ParakeetPtt.sln --configuration Release --no-restore
+
+      - name: Audit NuGet packages
+        run: dotnet list ParakeetPtt.sln package --vulnerable --include-transitive

@@ -78,6 +78,8 @@ On first real use the app downloads assets under `%LOCALAPPDATA%\ParakeetPtt`:
 - CPU fallback runtime.
 - Default `tdt_ctc-110m-f16.gguf` model from `mudler/parakeet-cpp-gguf`.
 
+Expect first-run downloads to be hundreds of MB for the default model and runtime assets. The optional larger multilingual model is about 1.4 GB.
+
 Open the tray menu for settings, session-only transcript history, and runtime/model path overrides.
 
 ## Downloaded Assets
@@ -97,7 +99,7 @@ Every published release should include a SHA-256 checksum for the downloadable z
 Get-FileHash .\ParakeetPtt-win-x64.zip -Algorithm SHA256
 ```
 
-Recommended hardening for public releases includes code signing, SBOM publication, and build provenance such as GitHub artifact attestations or SLSA-compatible provenance.
+Release builds from this repository publish the zip, checksum, CycloneDX SBOM, and GitHub artifact attestation. Tag builds create a draft GitHub Release so maintainers can review assets before publishing. Recommended additional hardening for broad public distribution includes code signing.
 
 ## Validation
 
