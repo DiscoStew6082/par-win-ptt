@@ -23,6 +23,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private bool _acceptedRecordingStart;
     private bool _toggleRecordingActive;
     private bool _settingsOpening;
+    private bool _listeningPreviewActive;
     private string? _lastTranscriptPreview;
 
     public TrayApplicationContext()
@@ -30,18 +31,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _recorder = new WaveInAudioRecorder(AppPaths.RootDirectory);
         _recorder.AudioLevelChanged += OnAudioLevelChanged;
+        var transcriber = new LazyAssetTranscriber(
+            AppPaths.RootDirectory,
+            _settingsStore,
+            () => _settings,
+            settings => _settings = settings,
+            message => ShowTrayNotification("Parakeet PTT", message, ToolTipIcon.Info));
         _dictationController = new DictationController(
-            _recorder,
-            new LazyAssetTranscriber(
-                AppPaths.RootDirectory,
-                _settingsStore,
-                () => _settings,
-                settings => _settings = settings,
-                message => ShowTrayNotification("Parakeet PTT", message, ToolTipIcon.Info)),
+            new ChunkedTranscribingDictationSessionFactory(_recorder, transcriber),
             new ClipboardPaster(),
             _history,
             ShowTranscriptPreview,
-            ShowCleanupWarning);
+            ShowCleanupWarning,
+            OnTranscriptUpdate);
 
         _trayIcon = TrayIconFactory.Create();
         _notifyIcon = new NotifyIcon
@@ -208,6 +210,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (await _dictationController.HandleHotkeyDownAsync(_lifetime.Token))
         {
             _acceptedRecordingStart = true;
+            _listeningPreviewActive = true;
             PlayStatusSound(StatusSound.Listening);
             ShowStatus(DictationStatusCatalog.Listening, ToolTipIcon.Info, mode: ListeningTriggerMode.PushToTalk);
         }
@@ -246,6 +249,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (await _dictationController.HandleHotkeyDownAsync(_lifetime.Token))
         {
             _toggleRecordingActive = true;
+            _listeningPreviewActive = true;
             PlayStatusSound(StatusSound.Listening);
             ShowStatus(
                 DictationStatusCatalog.Listening,
@@ -258,6 +262,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private async Task StopRecordingAndTranscribeAsync()
     {
         _lastTranscriptPreview = null;
+        _listeningPreviewActive = false;
         PlayStatusSound(StatusSound.Transcribing);
         ShowStatus(DictationStatusCatalog.Transcribing, ToolTipIcon.Info);
         try
@@ -311,6 +316,30 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         _lastTranscriptPreview = transcript;
         ShowStatus(DictationStatusCatalog.TranscriptPreview(transcript), ToolTipIcon.Info, notify: false);
+    }
+
+    private void OnTranscriptUpdate(TranscriptUpdate update)
+    {
+        if (update.Kind != TranscriptUpdateKind.Partial)
+        {
+            return;
+        }
+
+        _uiContext.Post(_ =>
+        {
+            if (_exiting || _statusOverlay.IsDisposed || !_listeningPreviewActive)
+            {
+                return;
+            }
+
+            var text = string.IsNullOrWhiteSpace(update.UnstableText)
+                ? update.StableText
+                : $"{update.StableText} {update.UnstableText}".Trim();
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                ShowStatus(DictationStatusCatalog.TranscriptPreview(text), ToolTipIcon.Info, notify: false);
+            }
+        }, null);
     }
 
     private void ShowCleanupWarning(string path)

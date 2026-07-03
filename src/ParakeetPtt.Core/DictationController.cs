@@ -1,15 +1,48 @@
 namespace ParakeetPtt.Core;
 
-public sealed class DictationController(
-    IAudioRecorder recorder,
-    ITranscriber transcriber,
-    IClipboardPaster clipboardPaster,
-    SessionHistory history,
-    Action<string>? transcriptPreviewReady = null,
-    Action<string>? cleanupWarningReady = null)
+public sealed class DictationController
 {
+    private readonly IDictationSessionFactory _sessionFactory;
+    private readonly IClipboardPaster _clipboardPaster;
+    private readonly SessionHistory _history;
+    private readonly Action<string>? _transcriptPreviewReady;
+    private readonly Action<string>? _cleanupWarningReady;
+    private readonly Action<TranscriptUpdate>? _transcriptUpdateReady;
+    private IDictationSession? _session;
     private bool _isRecording;
     private bool _isProcessing;
+
+    public DictationController(
+        IAudioRecorder recorder,
+        ITranscriber transcriber,
+        IClipboardPaster clipboardPaster,
+        SessionHistory history,
+        Action<string>? transcriptPreviewReady = null,
+        Action<string>? cleanupWarningReady = null)
+        : this(
+            new BatchDictationSessionFactory(recorder, transcriber),
+            clipboardPaster,
+            history,
+            transcriptPreviewReady,
+            cleanupWarningReady)
+    {
+    }
+
+    public DictationController(
+        IDictationSessionFactory sessionFactory,
+        IClipboardPaster clipboardPaster,
+        SessionHistory history,
+        Action<string>? transcriptPreviewReady = null,
+        Action<string>? cleanupWarningReady = null,
+        Action<TranscriptUpdate>? transcriptUpdateReady = null)
+    {
+        _sessionFactory = sessionFactory;
+        _clipboardPaster = clipboardPaster;
+        _history = history;
+        _transcriptPreviewReady = transcriptPreviewReady;
+        _cleanupWarningReady = cleanupWarningReady;
+        _transcriptUpdateReady = transcriptUpdateReady;
+    }
 
     public async Task<bool> HandleHotkeyDownAsync(CancellationToken cancellationToken)
     {
@@ -19,7 +52,20 @@ public sealed class DictationController(
         }
 
         _isRecording = true;
-        await recorder.StartAsync(cancellationToken);
+        _session = _sessionFactory.CreateSession();
+        _session.TranscriptUpdated += OnTranscriptUpdated;
+        try
+        {
+            await _session.StartAsync(cancellationToken);
+        }
+        catch
+        {
+            _session.TranscriptUpdated -= OnTranscriptUpdated;
+            _session = null;
+            _isRecording = false;
+            throw;
+        }
+
         return true;
     }
 
@@ -33,33 +79,49 @@ public sealed class DictationController(
         _isRecording = false;
         _isProcessing = true;
 
-        RecordedAudio? audio = null;
+        DictationSessionResult? sessionResult = null;
         try
         {
-            audio = await recorder.StopAsync(cancellationToken);
-            var result = await transcriber.TranscribeAsync(audio.Path, cancellationToken);
-            var cleaned = TranscriptNormalizer.Normalize(result.Text);
+            if (_session is null)
+            {
+                return DictationOutcome.NotRecording;
+            }
+
+            sessionResult = await _session.StopAsync(cancellationToken);
+            var cleaned = TranscriptNormalizer.Normalize(sessionResult.Transcript.Text);
             if (cleaned.Length == 0)
             {
                 return DictationOutcome.EmptyTranscript;
             }
 
             TryPublishTranscriptPreview(cleaned);
-            history.Add(cleaned);
-            await clipboardPaster.PasteAsync(cleaned, cancellationToken);
+            TryPublishTranscriptUpdate(new TranscriptUpdate(TranscriptUpdateKind.Final, cleaned));
+            _history.Add(cleaned);
+            await _clipboardPaster.PasteAsync(cleaned, cancellationToken);
             return DictationOutcome.Pasted;
         }
         finally
         {
-            if (audio is { DeleteAfterUse: true })
+            if (_session is not null)
             {
-                if (!TryDelete(audio.Path))
-                {
-                    TryPublishCleanupWarning(audio.Path);
-                }
+                _session.TranscriptUpdated -= OnTranscriptUpdated;
+                _session = null;
+            }
+
+            if (sessionResult?.FinalAudio is { DeleteAfterUse: true } audio)
+            {
+                TryDeleteOrWarn(audio.Path);
             }
 
             _isProcessing = false;
+        }
+    }
+
+    private void TryDeleteOrWarn(string path)
+    {
+        if (!TryDelete(path))
+        {
+            TryPublishCleanupWarning(path);
         }
     }
 
@@ -88,7 +150,23 @@ public sealed class DictationController(
     {
         try
         {
-            transcriptPreviewReady?.Invoke(text);
+            _transcriptPreviewReady?.Invoke(text);
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private void OnTranscriptUpdated(TranscriptUpdate update)
+    {
+        TryPublishTranscriptUpdate(update);
+    }
+
+    private void TryPublishTranscriptUpdate(TranscriptUpdate update)
+    {
+        try
+        {
+            _transcriptUpdateReady?.Invoke(update);
         }
         catch (Exception)
         {
@@ -99,7 +177,7 @@ public sealed class DictationController(
     {
         try
         {
-            cleanupWarningReady?.Invoke(path);
+            _cleanupWarningReady?.Invoke(path);
         }
         catch (Exception)
         {
@@ -112,4 +190,63 @@ public enum DictationOutcome
     NotRecording,
     EmptyTranscript,
     Pasted
+}
+
+internal sealed class BatchDictationSessionFactory(IAudioRecorder recorder, ITranscriber transcriber) : IDictationSessionFactory
+{
+    public IDictationSession CreateSession()
+    {
+        return new BatchDictationSession(recorder, transcriber);
+    }
+}
+
+internal sealed class BatchDictationSession(IAudioRecorder recorder, ITranscriber transcriber) : IDictationSession
+{
+    public event Action<TranscriptUpdate>? TranscriptUpdated
+    {
+        add { }
+        remove { }
+    }
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        return recorder.StartAsync(cancellationToken);
+    }
+
+    public async Task<DictationSessionResult> StopAsync(CancellationToken cancellationToken)
+    {
+        RecordedAudio? audio = null;
+        try
+        {
+            audio = await recorder.StopAsync(cancellationToken);
+            var result = await transcriber.TranscribeAsync(audio.Path, cancellationToken);
+            return new DictationSessionResult(result, audio);
+        }
+        catch
+        {
+            if (audio is { DeleteAfterUse: true })
+            {
+                TryDelete(audio.Path);
+            }
+
+            throw;
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
 }

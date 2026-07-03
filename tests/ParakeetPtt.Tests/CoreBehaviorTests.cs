@@ -47,6 +47,128 @@ public sealed class CoreBehaviorTests
     }
 
     [TestMethod]
+    public async Task IncrementalSessionPublishesPartialTextButOnlyPastesFinalTranscript()
+    {
+        var session = new FakeDictationSession("  final text  ");
+        var updates = new List<TranscriptUpdate>();
+        var history = new SessionHistory();
+        var paster = new FakeClipboardPaster();
+        var controller = new DictationController(
+            new FakeDictationSessionFactory(session),
+            paster,
+            history,
+            transcriptUpdateReady: updates.Add);
+
+        var started = await controller.HandleHotkeyDownAsync(CancellationToken.None);
+        session.PublishPartial("partial text");
+
+        Assert.IsTrue(started);
+        Assert.IsNull(paster.PastedText);
+        Assert.AreEqual(0, history.Items.Count);
+        Assert.AreEqual(1, updates.Count);
+        Assert.AreEqual(TranscriptUpdateKind.Partial, updates[0].Kind);
+        Assert.AreEqual("partial text", updates[0].StableText);
+
+        var outcome = await controller.HandleHotkeyUpAsync(CancellationToken.None);
+
+        Assert.AreEqual(DictationOutcome.Pasted, outcome);
+        Assert.AreEqual("Final text.", paster.PastedText);
+        CollectionAssert.AreEqual(new[] { "Final text." }, history.Items.ToArray());
+        Assert.AreEqual(1, session.StartCount);
+        Assert.AreEqual(1, session.StopCount);
+    }
+
+    [TestMethod]
+    public async Task ChunkedSessionPublishesMergedPartialsAndDeletesChunkFiles()
+    {
+        var chunkOne = Path.Combine(Path.GetTempPath(), $"parakeet-chunk-{Guid.NewGuid():N}-1.wav");
+        var chunkTwo = Path.Combine(Path.GetTempPath(), $"parakeet-chunk-{Guid.NewGuid():N}-2.wav");
+        var finalAudio = Path.Combine(Path.GetTempPath(), $"parakeet-final-{Guid.NewGuid():N}.wav");
+        await File.WriteAllTextAsync(chunkOne, "chunk one");
+        await File.WriteAllTextAsync(chunkTwo, "chunk two");
+        await File.WriteAllTextAsync(finalAudio, "final");
+        var recorder = new FakeChunkedAudioRecorder(finalAudio);
+        var transcriber = new FakeMappedTranscriber(new Dictionary<string, string>
+        {
+            [chunkOne] = "hello brave",
+            [chunkTwo] = "brave new world",
+            [finalAudio] = "hello brave new world"
+        });
+        var session = new ChunkedTranscribingDictationSession(recorder, transcriber);
+        var updates = new List<TranscriptUpdate>();
+        session.TranscriptUpdated += updates.Add;
+
+        await session.StartAsync(CancellationToken.None);
+        recorder.PublishChunk(chunkOne);
+        recorder.PublishChunk(chunkTwo);
+        await WaitUntilAsync(() => updates.Count == 2);
+        var result = await session.StopAsync(CancellationToken.None);
+
+        Assert.AreEqual("hello brave new world", result.Transcript.Text);
+        CollectionAssert.AreEqual(
+            new[] { "hello brave", "hello brave new world" },
+            updates.Select(update => update.StableText).ToArray());
+        Assert.IsFalse(File.Exists(chunkOne));
+        Assert.IsFalse(File.Exists(chunkTwo));
+        Assert.IsTrue(File.Exists(finalAudio));
+        File.Delete(finalAudio);
+    }
+
+    [TestMethod]
+    public async Task ChunkedSessionStartFailureUnsubscribesFromRecorderChunks()
+    {
+        var recorder = new FailingStartChunkedAudioRecorder();
+        var session = new ChunkedTranscribingDictationSession(recorder, new FakeTranscriber("unused"));
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => session.StartAsync(CancellationToken.None));
+
+        Assert.AreEqual(0, recorder.ChunkSubscriptionCount);
+    }
+
+    [TestMethod]
+    public async Task ChunkedSessionStopCancelsPartialWorkBeforeFinalTranscription()
+    {
+        var chunk = Path.Combine(Path.GetTempPath(), $"parakeet-chunk-{Guid.NewGuid():N}.wav");
+        var finalAudio = Path.Combine(Path.GetTempPath(), $"parakeet-final-{Guid.NewGuid():N}.wav");
+        await File.WriteAllTextAsync(chunk, "chunk");
+        await File.WriteAllTextAsync(finalAudio, "final");
+        var recorder = new FakeChunkedAudioRecorder(finalAudio);
+        var transcriber = new BlockingChunkTranscriber(chunk, finalAudio, "final wins");
+        var session = new ChunkedTranscribingDictationSession(recorder, transcriber);
+
+        await session.StartAsync(CancellationToken.None);
+        recorder.PublishChunk(chunk);
+        await transcriber.ChunkStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var result = await session.StopAsync(CancellationToken.None);
+
+        Assert.AreEqual("final wins", result.Transcript.Text);
+        Assert.IsTrue(transcriber.ChunkCancellationObserved.Task.IsCompleted);
+        Assert.IsFalse(File.Exists(chunk));
+        File.Delete(finalAudio);
+    }
+
+    [TestMethod]
+    public async Task ChunkedSessionStopFailureCancelsPartialWork()
+    {
+        var chunk = Path.Combine(Path.GetTempPath(), $"parakeet-chunk-{Guid.NewGuid():N}.wav");
+        await File.WriteAllTextAsync(chunk, "chunk");
+        var recorder = new FailingStopChunkedAudioRecorder();
+        var transcriber = new BlockingChunkTranscriber(chunk, "unused-final.wav", "unused");
+        var session = new ChunkedTranscribingDictationSession(recorder, transcriber);
+
+        await session.StartAsync(CancellationToken.None);
+        recorder.PublishChunk(chunk);
+        await transcriber.ChunkStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => session.StopAsync(CancellationToken.None));
+
+        Assert.IsTrue(transcriber.ChunkCancellationObserved.Task.IsCompleted);
+        Assert.IsFalse(File.Exists(chunk));
+    }
+
+    [TestMethod]
     public async Task PreviewFailureDoesNotBlockPaste()
     {
         var paster = new FakeClipboardPaster();
@@ -83,6 +205,25 @@ public sealed class CoreBehaviorTests
         Assert.AreEqual(DictationOutcome.Pasted, outcome);
         Assert.AreEqual(1, recorder.StartCount);
         Assert.AreEqual(1, recorder.StopCount);
+    }
+
+    [TestMethod]
+    public async Task FailedRecordingStartDoesNotLeaveControllerRecording()
+    {
+        var failingSession = new FailingStartDictationSession();
+        var succeedingSession = new FakeDictationSession("hello");
+        var controller = new DictationController(
+            new SequenceDictationSessionFactory(failingSession, succeedingSession),
+            new FakeClipboardPaster(),
+            new SessionHistory());
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => controller.HandleHotkeyDownAsync(CancellationToken.None));
+        var startedAfterFailure = await controller.HandleHotkeyDownAsync(CancellationToken.None);
+
+        Assert.IsTrue(startedAfterFailure);
+        Assert.AreEqual(1, failingSession.StartCount);
+        Assert.AreEqual(1, succeedingSession.StartCount);
     }
 
     [TestMethod]
@@ -250,6 +391,15 @@ public sealed class CoreBehaviorTests
         File.Delete(path);
     }
 
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        while (!condition())
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+    }
+
     [TestMethod]
     public void RuntimeRegistryPinsLatestWindowsCudaAndCpuAssets()
     {
@@ -392,6 +542,149 @@ internal sealed class FakeAudioRecorder(string path, bool deleteAfterUse = false
     }
 }
 
+internal sealed class FakeChunkedAudioRecorder(string finalPath) : IChunkedAudioRecorder
+{
+    public event Action<RecordedAudio>? AudioChunkReady;
+
+    public int StartCount { get; private set; }
+
+    public int StopCount { get; private set; }
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        StartCount++;
+        return Task.CompletedTask;
+    }
+
+    public Task<RecordedAudio> StopAsync(CancellationToken cancellationToken)
+    {
+        StopCount++;
+        return Task.FromResult(new RecordedAudio(finalPath, TimeSpan.FromSeconds(4), DeleteAfterUse: true));
+    }
+
+    public void PublishChunk(string path)
+    {
+        AudioChunkReady?.Invoke(new RecordedAudio(path, TimeSpan.FromSeconds(4), DeleteAfterUse: true));
+    }
+}
+
+internal sealed class FailingStartChunkedAudioRecorder : IChunkedAudioRecorder
+{
+    private Action<RecordedAudio>? _audioChunkReady;
+
+    public event Action<RecordedAudio>? AudioChunkReady
+    {
+        add
+        {
+            _audioChunkReady += value;
+            ChunkSubscriptionCount++;
+        }
+        remove
+        {
+            _audioChunkReady -= value;
+            ChunkSubscriptionCount--;
+        }
+    }
+
+    public int ChunkSubscriptionCount { get; private set; }
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        throw new InvalidOperationException("start failed");
+    }
+
+    public Task<RecordedAudio> StopAsync(CancellationToken cancellationToken)
+    {
+        throw new NotSupportedException();
+    }
+}
+
+internal sealed class FailingStopChunkedAudioRecorder : IChunkedAudioRecorder
+{
+    public event Action<RecordedAudio>? AudioChunkReady;
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        return Task.CompletedTask;
+    }
+
+    public Task<RecordedAudio> StopAsync(CancellationToken cancellationToken)
+    {
+        throw new InvalidOperationException("stop failed");
+    }
+
+    public void PublishChunk(string path)
+    {
+        AudioChunkReady?.Invoke(new RecordedAudio(path, TimeSpan.FromSeconds(4), DeleteAfterUse: true));
+    }
+}
+
+internal sealed class FakeDictationSessionFactory(FakeDictationSession session) : IDictationSessionFactory
+{
+    public IDictationSession CreateSession()
+    {
+        return session;
+    }
+}
+
+internal sealed class FakeDictationSession(string transcript) : IDictationSession
+{
+    public event Action<TranscriptUpdate>? TranscriptUpdated;
+
+    public int StartCount { get; private set; }
+
+    public int StopCount { get; private set; }
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        StartCount++;
+        return Task.CompletedTask;
+    }
+
+    public Task<DictationSessionResult> StopAsync(CancellationToken cancellationToken)
+    {
+        StopCount++;
+        return Task.FromResult(new DictationSessionResult(new TranscriptResult(transcript, null, null)));
+    }
+
+    public void PublishPartial(string text)
+    {
+        TranscriptUpdated?.Invoke(new TranscriptUpdate(TranscriptUpdateKind.Partial, text));
+    }
+}
+
+internal sealed class SequenceDictationSessionFactory(params IDictationSession[] sessions) : IDictationSessionFactory
+{
+    private int _index;
+
+    public IDictationSession CreateSession()
+    {
+        return sessions[_index++];
+    }
+}
+
+internal sealed class FailingStartDictationSession : IDictationSession
+{
+    public event Action<TranscriptUpdate>? TranscriptUpdated
+    {
+        add { }
+        remove { }
+    }
+
+    public int StartCount { get; private set; }
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        StartCount++;
+        throw new InvalidOperationException("start failed");
+    }
+
+    public Task<DictationSessionResult> StopAsync(CancellationToken cancellationToken)
+    {
+        throw new NotSupportedException();
+    }
+}
+
 internal sealed class FakeTranscriber(string transcript) : ITranscriber
 {
     public string? LastAudioPath { get; private set; }
@@ -400,6 +693,50 @@ internal sealed class FakeTranscriber(string transcript) : ITranscriber
     {
         LastAudioPath = wavPath;
         return Task.FromResult(new TranscriptResult(transcript, TimeSpan.FromMilliseconds(500), null));
+    }
+}
+
+internal sealed class FakeMappedTranscriber(IReadOnlyDictionary<string, string> transcripts) : ITranscriber
+{
+    public Task<TranscriptResult> TranscribeAsync(string wavPath, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(new TranscriptResult(transcripts[wavPath], TimeSpan.FromMilliseconds(10), null));
+    }
+}
+
+internal sealed class BlockingChunkTranscriber(
+    string chunkPath,
+    string finalPath,
+    string finalTranscript) : ITranscriber
+{
+    public TaskCompletionSource ChunkStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public TaskCompletionSource ChunkCancellationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task<TranscriptResult> TranscribeAsync(string wavPath, CancellationToken cancellationToken)
+    {
+        if (wavPath == finalPath)
+        {
+            return new TranscriptResult(finalTranscript, TimeSpan.FromMilliseconds(10), null);
+        }
+
+        if (wavPath != chunkPath)
+        {
+            throw new InvalidOperationException("Unexpected path.");
+        }
+
+        ChunkStarted.SetResult();
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            ChunkCancellationObserved.SetResult();
+            throw;
+        }
+
+        throw new InvalidOperationException("Chunk transcription should not complete.");
     }
 }
 

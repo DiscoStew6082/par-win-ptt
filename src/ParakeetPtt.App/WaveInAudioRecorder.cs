@@ -3,7 +3,7 @@ using ParakeetPtt.Core;
 
 namespace ParakeetPtt.App;
 
-internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
+internal sealed class WaveInAudioRecorder : IChunkedAudioRecorder, IDisposable
 {
     private const int WaveMapper = -1;
     private const int WaveFormatPcm = 1;
@@ -11,6 +11,11 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
     private const int WimData = 0x3C0;
     private const int BufferCount = 4;
     private const int BufferSize = 4096;
+    private const int BytesPerSecond = 32000;
+    private const int ChunkDurationMilliseconds = 4000;
+    private const int ChunkOverlapMilliseconds = 800;
+    private const int ChunkBytes = BytesPerSecond * ChunkDurationMilliseconds / 1000;
+    private const int ChunkOverlapBytes = BytesPerSecond * ChunkOverlapMilliseconds / 1000;
 
     private readonly object _gate = new();
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
@@ -24,8 +29,12 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
     private bool _stopping;
     private bool _disposed;
     private bool _disposeRequested;
+    private long _chunkStartByte;
+    private int _chunkSequence;
 
     public event Action<double>? AudioLevelChanged;
+
+    public event Action<RecordedAudio>? AudioChunkReady;
 
     public WaveInAudioRecorder()
         : this(Path.GetTempPath())
@@ -88,6 +97,8 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
                 {
                     _pcm = new MemoryStream();
                     _startedAt = DateTimeOffset.UtcNow;
+                    _chunkStartByte = 0;
+                    _chunkSequence = 0;
                     _handle = handle;
                     _buffers.AddRange(buffers);
                     _recording = true;
@@ -294,6 +305,7 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
         }
 
         double? level = null;
+        PendingChunk? pendingChunk = null;
         lock (_gate)
         {
             if (_pcm is null)
@@ -308,6 +320,7 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
                 Marshal.Copy(header.Data, data, 0, data.Length);
                 _pcm.Write(data, 0, data.Length);
                 level = AudioLevelCalculator.CalculatePeakLevel(data);
+                pendingChunk = TryCreatePendingChunk();
             }
 
             if (_recording && !_stopping)
@@ -319,6 +332,70 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
         if (level.HasValue)
         {
             AudioLevelChanged?.Invoke(level.Value);
+        }
+
+        if (pendingChunk is not null)
+        {
+            _ = Task.Run(() => WriteChunkAndPublish(pendingChunk));
+        }
+    }
+
+    private PendingChunk? TryCreatePendingChunk()
+    {
+        if (AudioChunkReady is null || _pcm is null || _pcm.Length - _chunkStartByte < ChunkBytes)
+        {
+            return null;
+        }
+
+        var chunkStart = _chunkStartByte;
+        var chunkEnd = _pcm.Length;
+        var pcm = _pcm.ToArray();
+        var chunkLength = checked((int)(chunkEnd - chunkStart));
+        var chunkOffset = checked((int)chunkStart);
+        var chunkBytes = new byte[chunkLength];
+        Array.Copy(pcm, chunkOffset, chunkBytes, 0, chunkBytes.Length);
+        _chunkStartByte = Math.Max(0, chunkEnd - ChunkOverlapBytes);
+        var path = Path.Combine(_appData, $"chunk-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fff}-{_chunkSequence++:000}.wav");
+        return new PendingChunk(path, chunkBytes, TimeSpan.FromSeconds((double)chunkBytes.Length / BytesPerSecond));
+    }
+
+    private void WriteChunkAndPublish(PendingChunk chunk)
+    {
+        try
+        {
+            WriteWav(chunk.Path, chunk.Pcm);
+            var audio = new RecordedAudio(chunk.Path, chunk.Duration, DeleteAfterUse: true);
+            var handler = AudioChunkReady;
+            if (handler is null)
+            {
+                TryDelete(chunk.Path);
+                return;
+            }
+
+            handler.Invoke(audio);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
         }
     }
 
@@ -349,6 +426,8 @@ internal sealed class WaveInAudioRecorder : IAudioRecorder, IDisposable
             throw new InvalidOperationException($"{operation} failed with WinMM error {result}.");
         }
     }
+
+    private sealed record PendingChunk(string Path, byte[] Pcm, TimeSpan Duration);
 
     private sealed class WaveBuffer : IDisposable
     {
