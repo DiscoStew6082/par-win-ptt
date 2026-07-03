@@ -122,6 +122,16 @@ Chunked dictation smoke checks on July 3, 2026 with the locally installed CPU ru
 - `parakeet-cli transcribe --timestamps` prints word timestamps for the same WAV.
 - `parakeet-cli transcribe --stream` is available in the CLI help, but the default model rejects it because streaming requires a cache-aware model such as `parakeet_realtime_eou_120m-v1`.
 
+An overlapped local chunk smoke manually split `smoke\sample.wav` into 2.5 second chunks with 0.8 second overlap and transcribed each chunk through the installed CPU `parakeet-cli`:
+
+Model: `tdt_ctc-110m-f16.gguf` (`f16`)
+
+| Context | Wall time | Transcript |
+| --- | ---: | --- |
+| chunk 1 | 160 ms | Hello parakeet push to talk. |
+| chunk 2 | 149 ms | to talk. |
+| full sample | 199 ms | Hello parakeet push to talk. |
+
 Manual microphone validation still needs to confirm end-to-end overlay latency and final paste quality on a real input device:
 
 ```text
