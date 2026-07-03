@@ -12,10 +12,12 @@ Prerequisites:
 
 The app targets .NET 10 LTS, which is supported until November 14, 2028.
 
-Run the test suite before opening a pull request:
+Run the CI-equivalent checks before opening a pull request:
 
 ```powershell
-dotnet test ParakeetPtt.sln
+dotnet restore ParakeetPtt.sln --locked-mode
+dotnet test ParakeetPtt.sln --configuration Release --no-restore
+dotnet list ParakeetPtt.sln package --vulnerable --include-transitive
 ```
 
 Create a local release build with:
@@ -39,4 +41,5 @@ Generated output belongs under `publish\`, `bin\`, or `obj\` and should not be c
 - Keep changes focused.
 - Add or update tests for behavior changes.
 - Prefer public-interface tests over implementation-detail tests.
-- Update `README.md` when behavior, setup, or publishing instructions change.
+- Update `README.md` when behavior, setup, privacy boundaries, downloaded assets, or publishing instructions change.
+- Keep `SECURITY.md` aligned with any change to clipboard behavior, temporary audio retention, runtime/model downloads, or local path overrides.
