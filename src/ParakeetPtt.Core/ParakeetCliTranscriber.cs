@@ -33,6 +33,7 @@ public sealed class ParakeetCliTranscriber(CliTranscriberOptions options, IProce
     {
         var text = output.Trim();
         double? confidence = null;
+        IReadOnlyList<TranscriptWord> words = [];
 
         if (text.StartsWith('{'))
         {
@@ -49,9 +50,11 @@ public sealed class ParakeetCliTranscriber(CliTranscriberOptions options, IProce
             {
                 confidence = parsedConfidence;
             }
+
+            words = ReadWords(root);
         }
 
-        return new TranscriptResult(text, elapsed, confidence);
+        return new TranscriptResult(text, elapsed, confidence, words);
     }
 
     private static string? ReadString(JsonElement element, string propertyName)
@@ -59,6 +62,52 @@ public sealed class ParakeetCliTranscriber(CliTranscriberOptions options, IProce
         return element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
             ? property.GetString()
             : null;
+    }
+
+    private static IReadOnlyList<TranscriptWord> ReadWords(JsonElement root)
+    {
+        if (!root.TryGetProperty("words", out var wordsElement) || wordsElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var words = new List<TranscriptWord>();
+        foreach (var wordElement in wordsElement.EnumerateArray())
+        {
+            if (wordElement.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var text = ReadString(wordElement, "w")
+                ?? ReadString(wordElement, "word")
+                ?? ReadString(wordElement, "text");
+            if (string.IsNullOrWhiteSpace(text)
+                || !TryReadSeconds(wordElement, "start", out var start)
+                || !TryReadSeconds(wordElement, "end", out var end))
+            {
+                continue;
+            }
+
+            double? confidence = null;
+            if (TryReadSeconds(wordElement, "conf", out var parsedConfidence)
+                || TryReadSeconds(wordElement, "confidence", out parsedConfidence))
+            {
+                confidence = parsedConfidence;
+            }
+
+            words.Add(new TranscriptWord(text, TimeSpan.FromSeconds(start), TimeSpan.FromSeconds(end), confidence));
+        }
+
+        return words;
+    }
+
+    private static bool TryReadSeconds(JsonElement element, string propertyName, out double seconds)
+    {
+        seconds = 0;
+        return element.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.Number
+            && property.TryGetDouble(out seconds);
     }
 }
 

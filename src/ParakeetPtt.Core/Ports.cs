@@ -37,7 +37,37 @@ public interface IClipboardPaster
 
 public sealed record RecordedAudio(string Path, TimeSpan Duration, bool DeleteAfterUse = false);
 
-public sealed record TranscriptResult(string Text, TimeSpan? InferenceTime, double? Confidence);
+public sealed record TranscriptWord(string Text, TimeSpan Start, TimeSpan End, double? Confidence);
+
+public sealed record TranscriptResult
+{
+    public TranscriptResult(
+        string text,
+        TimeSpan? inferenceTime,
+        double? confidence,
+        IReadOnlyList<TranscriptWord>? words = null)
+    {
+        Text = text;
+        InferenceTime = inferenceTime;
+        Confidence = confidence;
+        Words = words ?? [];
+    }
+
+    public string Text { get; init; }
+
+    public TimeSpan? InferenceTime { get; init; }
+
+    public double? Confidence { get; init; }
+
+    public IReadOnlyList<TranscriptWord> Words { get; init; }
+
+    public void Deconstruct(out string text, out TimeSpan? inferenceTime, out double? confidence)
+    {
+        text = Text;
+        inferenceTime = InferenceTime;
+        confidence = Confidence;
+    }
+}
 
 public sealed record DictationSessionResult(TranscriptResult Transcript, RecordedAudio? FinalAudio = null);
 

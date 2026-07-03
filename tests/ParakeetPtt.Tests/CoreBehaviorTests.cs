@@ -294,7 +294,7 @@ public sealed class CoreBehaviorTests
     [TestMethod]
     public async Task ParakeetCliTranscriberConstructsCommandAndParsesJson()
     {
-        var runner = new FakeProcessRunner("""{"text":"hello from cli","duration":1.25,"confidence":0.88}""");
+        var runner = new FakeProcessRunner("""{"text":"hello from cli","duration":1.25,"confidence":0.88,"words":[{"w":"hello","start":0.160,"end":0.480,"conf":0.9848},{"w":"from","start":0.560,"end":0.720,"conf":0.75},{"w":"cli","start":0.800,"end":1.040}]}""");
         var transcriber = new ParakeetCliTranscriber(
             new CliTranscriberOptions("C:\\tools\\parakeet-cli.exe", "C:\\models\\tdt_ctc-110m-f16.gguf"),
             runner);
@@ -303,11 +303,53 @@ public sealed class CoreBehaviorTests
 
         Assert.AreEqual("hello from cli", result.Text);
         Assert.AreEqual(0.88, result.Confidence);
+        Assert.AreEqual(3, result.Words.Count);
+        Assert.AreEqual("hello", result.Words[0].Text);
+        Assert.AreEqual(TimeSpan.FromSeconds(0.160), result.Words[0].Start);
+        Assert.AreEqual(TimeSpan.FromSeconds(0.480), result.Words[0].End);
+        Assert.AreEqual(0.9848, result.Words[0].Confidence);
+        Assert.AreEqual("cli", result.Words[2].Text);
+        Assert.IsNull(result.Words[2].Confidence);
         Assert.AreEqual("C:\\tools\\parakeet-cli.exe", runner.LastRequest?.FileName);
         Assert.AreEqual("C:\\tools", runner.LastRequest?.WorkingDirectory);
         CollectionAssert.AreEqual(
             new[] { "transcribe", "--model", "C:\\models\\tdt_ctc-110m-f16.gguf", "--input", "C:\\temp\\speech.wav", "--json" },
             runner.LastRequest?.Arguments.ToArray());
+    }
+
+    [TestMethod]
+    public void ParakeetCliParserAcceptsAlternateWordFieldNamesAndSkipsInvalidWords()
+    {
+        var result = ParakeetCliTranscriber.Parse(
+            """{"text":"hello world","words":[null,"skip",{"word":"hello","start":0.1,"end":0.2,"confidence":0.9},{"text":"world","start":0.3,"end":0.4,"conf":0.8},{"w":"skip me","start":0.5}]}""",
+            TimeSpan.FromMilliseconds(12));
+
+        Assert.AreEqual(2, result.Words.Count);
+        Assert.AreEqual("hello", result.Words[0].Text);
+        Assert.AreEqual(0.9, result.Words[0].Confidence);
+        Assert.AreEqual("world", result.Words[1].Text);
+        Assert.AreEqual(0.8, result.Words[1].Confidence);
+    }
+
+    [TestMethod]
+    public void TranscriptResultStillSupportsOriginalDeconstructionShape()
+    {
+        var result = new TranscriptResult("hello", TimeSpan.FromMilliseconds(12), 0.7);
+
+        var (text, inferenceTime, confidence) = result;
+
+        Assert.AreEqual("hello", text);
+        Assert.AreEqual(TimeSpan.FromMilliseconds(12), inferenceTime);
+        Assert.AreEqual(0.7, confidence);
+    }
+
+    [TestMethod]
+    public void ParakeetCliParserReturnsEmptyWordsForPlainText()
+    {
+        var result = ParakeetCliTranscriber.Parse("plain transcript", TimeSpan.FromMilliseconds(12));
+
+        Assert.AreEqual("plain transcript", result.Text);
+        Assert.AreEqual(0, result.Words.Count);
     }
 
     [TestMethod]
