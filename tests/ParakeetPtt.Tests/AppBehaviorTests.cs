@@ -164,9 +164,11 @@ public sealed class AppBehaviorTests
         Assert.AreEqual("chunk-1.wav", first.Path);
         CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, first.Pcm);
         Assert.AreEqual(TimeSpan.FromSeconds(2), first.Duration);
+        Assert.AreEqual(TimeSpan.Zero, first.OverlapDuration);
         Assert.IsNotNull(second);
         CollectionAssert.AreEqual(new byte[] { 7, 8, 9, 10, 11, 12, 13, 14 }, second.Pcm);
         Assert.AreEqual(TimeSpan.FromSeconds(2), second.Duration);
+        Assert.AreEqual(TimeSpan.FromSeconds(0.5), second.OverlapDuration);
         CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 }, buffer.ToArray());
     }
 
@@ -182,8 +184,10 @@ public sealed class AppBehaviorTests
 
         Assert.IsNotNull(first);
         CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, first.Pcm);
+        Assert.AreEqual(TimeSpan.Zero, first.OverlapDuration);
         Assert.IsNotNull(second);
         CollectionAssert.AreEqual(new byte[] { 7, 8, 9, 10, 11, 12, 13, 14 }, second.Pcm);
+        Assert.AreEqual(TimeSpan.FromSeconds(0.5), second.OverlapDuration);
         Assert.IsNull(third);
         CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }, buffer.ToArray());
     }
@@ -195,7 +199,7 @@ public sealed class AppBehaviorTests
         var deletedPaths = new List<string>();
 
         AudioChunkPublisher.Publish(
-            new PendingAudioChunk(path, [1, 2, 3, 4], TimeSpan.FromSeconds(1)),
+            new PendingAudioChunk(path, [1, 2, 3, 4], TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(250)),
             handler: null,
             writeWav: (chunkPath, pcm) => File.WriteAllBytes(chunkPath, pcm),
             delete: chunkPath =>
@@ -217,7 +221,7 @@ public sealed class AppBehaviorTests
         try
         {
             AudioChunkPublisher.Publish(
-                new PendingAudioChunk(path, [1, 2, 3, 4], TimeSpan.FromSeconds(1)),
+                new PendingAudioChunk(path, [1, 2, 3, 4], TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(250)),
                 audio => published = audio,
                 writeWav: (chunkPath, pcm) => File.WriteAllBytes(chunkPath, pcm),
                 delete: File.Delete);
@@ -225,6 +229,7 @@ public sealed class AppBehaviorTests
             Assert.IsNotNull(published);
             Assert.AreEqual(path, published.Path);
             Assert.AreEqual(TimeSpan.FromSeconds(1), published.Duration);
+            Assert.AreEqual(TimeSpan.FromMilliseconds(250), published.OverlapDuration);
             Assert.IsTrue(published.DeleteAfterUse);
             CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, File.ReadAllBytes(path));
         }

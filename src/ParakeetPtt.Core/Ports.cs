@@ -35,7 +35,19 @@ public interface IClipboardPaster
     Task PasteAsync(string text, CancellationToken cancellationToken);
 }
 
-public sealed record RecordedAudio(string Path, TimeSpan Duration, bool DeleteAfterUse = false);
+public sealed record RecordedAudio(
+    string Path,
+    TimeSpan Duration,
+    bool DeleteAfterUse = false,
+    TimeSpan? OverlapDuration = null)
+{
+    public void Deconstruct(out string path, out TimeSpan duration, out bool deleteAfterUse)
+    {
+        path = Path;
+        duration = Duration;
+        deleteAfterUse = DeleteAfterUse;
+    }
+}
 
 public sealed record TranscriptWord(string Text, TimeSpan Start, TimeSpan End, double? Confidence);
 

@@ -19,7 +19,11 @@ internal static class AudioChunkPublisher
                 return;
             }
 
-            handler.Invoke(new RecordedAudio(chunk.Path, chunk.Duration, DeleteAfterUse: true));
+            handler.Invoke(new RecordedAudio(
+                chunk.Path,
+                chunk.Duration,
+                DeleteAfterUse: true,
+                OverlapDuration: chunk.OverlapDuration));
         }
         catch (IOException)
         {

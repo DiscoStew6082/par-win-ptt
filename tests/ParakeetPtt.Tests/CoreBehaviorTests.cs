@@ -115,6 +115,101 @@ public sealed class CoreBehaviorTests
     }
 
     [TestMethod]
+    public async Task ChunkedSessionUsesWordTimestampsToDropOverlappedPartialWords()
+    {
+        var chunkOne = Path.Combine(Path.GetTempPath(), $"parakeet-chunk-{Guid.NewGuid():N}-1.wav");
+        var chunkTwo = Path.Combine(Path.GetTempPath(), $"parakeet-chunk-{Guid.NewGuid():N}-2.wav");
+        var finalAudio = Path.Combine(Path.GetTempPath(), $"parakeet-final-{Guid.NewGuid():N}.wav");
+        await File.WriteAllTextAsync(chunkOne, "chunk one");
+        await File.WriteAllTextAsync(chunkTwo, "chunk two");
+        await File.WriteAllTextAsync(finalAudio, "final");
+        var recorder = new FakeChunkedAudioRecorder(finalAudio);
+        var transcriber = new FakeResultTranscriber(new Dictionary<string, TranscriptResult>
+        {
+            [chunkOne] = new(
+                "hello brave",
+                TimeSpan.FromMilliseconds(10),
+                null,
+                [
+                    new TranscriptWord("hello", TimeSpan.FromSeconds(0.1), TimeSpan.FromSeconds(0.3), 0.9),
+                    new TranscriptWord("brave", TimeSpan.FromSeconds(0.4), TimeSpan.FromSeconds(0.7), 0.9)
+                ]),
+            [chunkTwo] = new(
+                "brave new world",
+                TimeSpan.FromMilliseconds(10),
+                null,
+                [
+                    new TranscriptWord("brave", TimeSpan.FromSeconds(0.1), TimeSpan.FromSeconds(0.6), 0.8),
+                    new TranscriptWord("new", TimeSpan.FromSeconds(0.9), TimeSpan.FromSeconds(1.1), 0.9),
+                    new TranscriptWord("world", TimeSpan.FromSeconds(1.2), TimeSpan.FromSeconds(1.5), 0.9)
+                ]),
+            [finalAudio] = new("hello brave new world", TimeSpan.FromMilliseconds(10), null)
+        });
+        var session = new ChunkedTranscribingDictationSession(recorder, transcriber);
+        var updates = new List<TranscriptUpdate>();
+        session.TranscriptUpdated += updates.Add;
+
+        await session.StartAsync(CancellationToken.None);
+        recorder.PublishChunk(chunkOne);
+        recorder.PublishChunk(chunkTwo, TimeSpan.FromSeconds(0.8));
+        await WaitUntilAsync(() => updates.Count == 2);
+        var result = await session.StopAsync(CancellationToken.None);
+
+        Assert.AreEqual("hello brave new world", result.Transcript.Text);
+        CollectionAssert.AreEqual(
+            new[] { "hello brave", "hello brave new world" },
+            updates.Select(update => update.StableText).ToArray());
+        File.Delete(finalAudio);
+    }
+
+    [TestMethod]
+    public async Task ChunkedSessionStillMergesTimestampWordsThatStraddleOverlapBoundary()
+    {
+        var chunkOne = Path.Combine(Path.GetTempPath(), $"parakeet-chunk-{Guid.NewGuid():N}-1.wav");
+        var chunkTwo = Path.Combine(Path.GetTempPath(), $"parakeet-chunk-{Guid.NewGuid():N}-2.wav");
+        var finalAudio = Path.Combine(Path.GetTempPath(), $"parakeet-final-{Guid.NewGuid():N}.wav");
+        await File.WriteAllTextAsync(chunkOne, "chunk one");
+        await File.WriteAllTextAsync(chunkTwo, "chunk two");
+        await File.WriteAllTextAsync(finalAudio, "final");
+        var recorder = new FakeChunkedAudioRecorder(finalAudio);
+        var transcriber = new FakeResultTranscriber(new Dictionary<string, TranscriptResult>
+        {
+            [chunkOne] = new(
+                "hello brave",
+                TimeSpan.FromMilliseconds(10),
+                null,
+                [
+                    new TranscriptWord("hello", TimeSpan.FromSeconds(0.1), TimeSpan.FromSeconds(0.3), 0.9),
+                    new TranscriptWord("brave", TimeSpan.FromSeconds(0.4), TimeSpan.FromSeconds(0.7), 0.9)
+                ]),
+            [chunkTwo] = new(
+                "brave new",
+                TimeSpan.FromMilliseconds(10),
+                null,
+                [
+                    new TranscriptWord("brave", TimeSpan.FromSeconds(0.4), TimeSpan.FromSeconds(0.9), 0.8),
+                    new TranscriptWord("new", TimeSpan.FromSeconds(1.0), TimeSpan.FromSeconds(1.2), 0.9)
+                ]),
+            [finalAudio] = new("hello brave new", TimeSpan.FromMilliseconds(10), null)
+        });
+        var session = new ChunkedTranscribingDictationSession(recorder, transcriber);
+        var updates = new List<TranscriptUpdate>();
+        session.TranscriptUpdated += updates.Add;
+
+        await session.StartAsync(CancellationToken.None);
+        recorder.PublishChunk(chunkOne);
+        recorder.PublishChunk(chunkTwo, TimeSpan.FromSeconds(0.8));
+        await WaitUntilAsync(() => updates.Count == 2);
+        var result = await session.StopAsync(CancellationToken.None);
+
+        Assert.AreEqual("hello brave new", result.Transcript.Text);
+        CollectionAssert.AreEqual(
+            new[] { "hello brave", "hello brave new" },
+            updates.Select(update => update.StableText).ToArray());
+        File.Delete(finalAudio);
+    }
+
+    [TestMethod]
     public async Task ChunkedSessionStartFailureUnsubscribesFromRecorderChunks()
     {
         var recorder = new FailingStartChunkedAudioRecorder();
@@ -341,6 +436,18 @@ public sealed class CoreBehaviorTests
         Assert.AreEqual("hello", text);
         Assert.AreEqual(TimeSpan.FromMilliseconds(12), inferenceTime);
         Assert.AreEqual(0.7, confidence);
+    }
+
+    [TestMethod]
+    public void RecordedAudioStillSupportsOriginalDeconstructionShape()
+    {
+        var audio = new RecordedAudio("utterance.wav", TimeSpan.FromSeconds(2), DeleteAfterUse: true);
+
+        var (path, duration, deleteAfterUse) = audio;
+
+        Assert.AreEqual("utterance.wav", path);
+        Assert.AreEqual(TimeSpan.FromSeconds(2), duration);
+        Assert.IsTrue(deleteAfterUse);
     }
 
     [TestMethod]
@@ -604,9 +711,13 @@ internal sealed class FakeChunkedAudioRecorder(string finalPath) : IChunkedAudio
         return Task.FromResult(new RecordedAudio(finalPath, TimeSpan.FromSeconds(4), DeleteAfterUse: true));
     }
 
-    public void PublishChunk(string path)
+    public void PublishChunk(string path, TimeSpan? overlap = null)
     {
-        AudioChunkReady?.Invoke(new RecordedAudio(path, TimeSpan.FromSeconds(4), DeleteAfterUse: true));
+        AudioChunkReady?.Invoke(new RecordedAudio(
+            path,
+            TimeSpan.FromSeconds(4),
+            DeleteAfterUse: true,
+            OverlapDuration: overlap ?? TimeSpan.Zero));
     }
 }
 
@@ -743,6 +854,14 @@ internal sealed class FakeMappedTranscriber(IReadOnlyDictionary<string, string> 
     public Task<TranscriptResult> TranscribeAsync(string wavPath, CancellationToken cancellationToken)
     {
         return Task.FromResult(new TranscriptResult(transcripts[wavPath], TimeSpan.FromMilliseconds(10), null));
+    }
+}
+
+internal sealed class FakeResultTranscriber(IReadOnlyDictionary<string, TranscriptResult> transcripts) : ITranscriber
+{
+    public Task<TranscriptResult> TranscribeAsync(string wavPath, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(transcripts[wavPath]);
     }
 }
 

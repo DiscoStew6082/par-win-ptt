@@ -141,7 +141,7 @@ public sealed class ChunkedTranscribingDictationSession(
                 return;
             }
 
-            var stableText = _assembler.Add(transcript.Text);
+            var stableText = _assembler.Add(transcript, chunk.OverlapDuration.GetValueOrDefault());
             if (stableText.Length > 0)
             {
                 TryPublish(new TranscriptUpdate(TranscriptUpdateKind.Partial, stableText));
@@ -220,7 +220,27 @@ internal sealed class IncrementalTranscriptAssembler
 {
     private readonly List<string> _words = [];
 
-    public string Add(string transcript)
+    public string Add(TranscriptResult transcript, TimeSpan overlapDuration)
+    {
+        if (transcript.Words.Count == 0)
+        {
+            return Add(transcript.Text);
+        }
+
+        var words = transcript.Words
+            .Where(word => word.End > overlapDuration)
+            .Select(word => word.Text)
+            .ToList();
+        if (words.Count == 0)
+        {
+            return Text;
+        }
+
+        AddWords(words);
+        return Text;
+    }
+
+    private string Add(string transcript)
     {
         var incoming = SplitWords(transcript);
         if (incoming.Count == 0)
@@ -228,9 +248,14 @@ internal sealed class IncrementalTranscriptAssembler
             return Text;
         }
 
+        AddWords(incoming);
+        return Text;
+    }
+
+    private void AddWords(IReadOnlyList<string> incoming)
+    {
         var overlap = FindOverlap(_words, incoming);
         _words.AddRange(incoming.Skip(overlap));
-        return Text;
     }
 
     private string Text => string.Join(" ", _words);

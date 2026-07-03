@@ -4,6 +4,7 @@ internal sealed class PcmChunkBuffer(int bytesPerSecond, int chunkBytes, int ove
 {
     private readonly MemoryStream _pcm = new();
     private long _chunkStartByte;
+    private bool _hasCreatedChunk;
 
     public void Append(ReadOnlySpan<byte> pcm)
     {
@@ -28,7 +29,15 @@ internal sealed class PcmChunkBuffer(int bytesPerSecond, int chunkBytes, int ove
         var chunkPcm = new byte[chunkLength];
         Buffer.BlockCopy(buffer.Array!, buffer.Offset + chunkStart, chunkPcm, 0, chunkLength);
         _chunkStartByte = Math.Max(0, chunkEnd - overlapBytes);
-        return new PendingAudioChunk(path, chunkPcm, TimeSpan.FromSeconds((double)chunkPcm.Length / bytesPerSecond));
+        var overlapDuration = _hasCreatedChunk
+            ? TimeSpan.FromSeconds((double)overlapBytes / bytesPerSecond)
+            : TimeSpan.Zero;
+        _hasCreatedChunk = true;
+        return new PendingAudioChunk(
+            path,
+            chunkPcm,
+            TimeSpan.FromSeconds((double)chunkPcm.Length / bytesPerSecond),
+            overlapDuration);
     }
 
     public byte[] ToArray()
@@ -42,4 +51,4 @@ internal sealed class PcmChunkBuffer(int bytesPerSecond, int chunkBytes, int ove
     }
 }
 
-internal sealed record PendingAudioChunk(string Path, byte[] Pcm, TimeSpan Duration);
+internal sealed record PendingAudioChunk(string Path, byte[] Pcm, TimeSpan Duration, TimeSpan OverlapDuration);
