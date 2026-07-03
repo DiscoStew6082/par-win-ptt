@@ -65,6 +65,7 @@ jobs:
             publish/ParakeetPtt.cdx.json
 
       - name: Attest release artifact
+        if: ${{ github.event.repository.private == false }}
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: publish/ParakeetPtt-win-x64.zip

@@ -99,7 +99,7 @@ Every published release should include a SHA-256 checksum for the downloadable z
 Get-FileHash .\ParakeetPtt-win-x64.zip -Algorithm SHA256
 ```
 
-Release builds from this repository publish the zip, checksum, CycloneDX SBOM, and GitHub artifact attestation. Tag builds create a draft GitHub Release so maintainers can review assets before publishing. Recommended additional hardening for broad public distribution includes code signing.
+Release builds from this repository publish the zip, checksum, and CycloneDX SBOM. Public tag builds also create a GitHub artifact attestation. Tag builds create a draft GitHub Release so maintainers can review assets before publishing. Recommended additional hardening for broad public distribution includes code signing.
 
 ## Validation
 
